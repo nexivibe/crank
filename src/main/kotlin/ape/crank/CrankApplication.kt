@@ -4,6 +4,7 @@ import ape.crank.config.StateManager
 import ape.crank.ui.MainWindow
 import javafx.application.Application
 import javafx.application.Platform
+import javafx.scene.control.Alert
 import javafx.stage.Stage
 
 /**
@@ -14,7 +15,33 @@ class CrankApplication : Application() {
     private lateinit var stateManager: StateManager
     private lateinit var mainWindow: MainWindow
 
+    override fun init() {
+        // Set up a global uncaught exception handler so crashes are visible
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            System.err.println("[Crank] Uncaught exception on thread ${thread.name}:")
+            throwable.printStackTrace()
+        }
+    }
+
     override fun start(stage: Stage) {
+        try {
+            doStart(stage)
+        } catch (e: Exception) {
+            System.err.println("[Crank] Fatal error during startup:")
+            e.printStackTrace()
+            // Show an error dialog if possible
+            try {
+                val alert = Alert(Alert.AlertType.ERROR)
+                alert.title = "Crank - Startup Error"
+                alert.headerText = "Failed to start Crank"
+                alert.contentText = "${e.javaClass.simpleName}: ${e.message}"
+                alert.showAndWait()
+            } catch (_: Exception) {}
+            Platform.exit()
+        }
+    }
+
+    private fun doStart(stage: Stage) {
         // Initialize state manager (loads persisted state from disk)
         stateManager = StateManager()
 

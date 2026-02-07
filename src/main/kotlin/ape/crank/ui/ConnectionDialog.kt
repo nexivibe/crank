@@ -17,7 +17,7 @@ import java.util.UUID
  */
 class ConnectionDialog(
     private val connections: MutableList<ConnectionConfig>,
-    private val openSessionIds: Set<String>,
+    private val sessionCountsByConnection: Map<String, Int>,
     private val onConnectionRemoved: (ConnectionConfig) -> Unit
 ) : Dialog<List<ConnectionConfig>>() {
 
@@ -418,7 +418,7 @@ class ConnectionDialog(
         val selected = connectionList.selectionModel.selectedItem ?: return
 
         // Count how many open sessions use this connection
-        val openCount = openSessionIds.count { it == selected.id }
+        val openCount = sessionCountsByConnection[selected.id] ?: 0
 
         if (openCount > 0) {
             val alert = Alert(Alert.AlertType.CONFIRMATION)

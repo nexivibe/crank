@@ -294,6 +294,39 @@ class TerminalWidget : Region() {
     private fun handleKeyPressed(event: KeyEvent) {
         val buf = buffer ?: return
 
+        // Handle Ctrl+key combinations (Ctrl+A=0x01 .. Ctrl+Z=0x1A, etc.)
+        if (event.isControlDown && !event.isAltDown && !event.isMetaDown) {
+            val code = event.code
+            val ctrlChar: Char? = when {
+                // Ctrl+A through Ctrl+Z -> 0x01 through 0x1A
+                code.isLetterKey && code.name.length == 1 -> (code.name[0].uppercaseChar() - 'A' + 1).toChar()
+                // Ctrl+[ -> ESC (0x1B), Ctrl+\ -> 0x1C, Ctrl+] -> 0x1D, Ctrl+^ -> 0x1E, Ctrl+_ -> 0x1F
+                code == KeyCode.OPEN_BRACKET -> '\u001B'
+                code == KeyCode.BACK_SLASH -> '\u001C'
+                code == KeyCode.CLOSE_BRACKET -> '\u001D'
+                code == KeyCode.DIGIT6 -> '\u001E' // Ctrl+6 = Ctrl+^ on US keyboards
+                code == KeyCode.MINUS -> '\u001F'
+                code == KeyCode.SPACE -> '\u0000' // Ctrl+Space -> NUL
+                else -> null
+            }
+            if (ctrlChar != null) {
+                onInput?.invoke(ctrlChar.toString())
+                event.consume()
+                return
+            }
+        }
+
+        // Handle Alt+key (send ESC prefix)
+        if (event.isAltDown && !event.isControlDown && !event.isMetaDown) {
+            val code = event.code
+            if (code.isLetterKey && code.name.length == 1) {
+                val ch = if (event.isShiftDown) code.name[0].uppercaseChar() else code.name[0].lowercaseChar()
+                onInput?.invoke("\u001B$ch")
+                event.consume()
+                return
+            }
+        }
+
         val seq: String? = when (event.code) {
             KeyCode.ENTER -> "\r"
             KeyCode.BACK_SPACE -> "\u007F"
@@ -338,14 +371,14 @@ class TerminalWidget : Region() {
         val ch = event.character
         if (ch.isEmpty()) return
 
-        // Filter out control characters that are handled by onKeyPressed
         val c = ch[0]
+        // Filter out control characters already handled by onKeyPressed
         if (c == '\r' || c == '\n' || c == '\t' || c == '\u001B' || c == '\u007F' || c == '\u0008') return
 
-        // Ignore non-printable characters
-        if (c.code < 32 && c.code != 0) return
+        // Skip control chars that were handled as Ctrl+key in handleKeyPressed
+        if (c.code in 1..26 || c.code == 0) return
 
-        if (ch.isNotEmpty() && c.code >= 32) {
+        if (c.code >= 32) {
             onInput?.invoke(ch)
             event.consume()
         }

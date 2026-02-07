@@ -30,6 +30,8 @@ class SessionTreeView : VBox() {
     var onNewTerminalRequested: (() -> Unit)? = null
     var onNewFolderRequested: (() -> Unit)? = null
     var onSessionRemoved: ((TerminalSession) -> Unit)? = null
+    var onFolderRenamed: ((SessionFolder) -> Unit)? = null
+    var onFolderRemoved: ((SessionFolder) -> Unit)? = null
 
     // ------------------------------------------------------------------ UI components
 
@@ -278,6 +280,7 @@ class SessionTreeView : VBox() {
             val result = dialog.showAndWait()
             if (result.isPresent && result.get().isNotBlank()) {
                 folder.name = result.get().trim()
+                onFolderRenamed?.invoke(folder)
                 // Trigger a refresh of this item's cell
                 val item = folderTreeItems[folder.id]
                 if (item != null) {
@@ -306,15 +309,7 @@ class SessionTreeView : VBox() {
                         }
                     }
                 }
-                // Remove the folder from the tree (the parent MainWindow should also
-                // remove it from state and call refresh)
-                folderTreeItems.remove(folder.id)
-                val parentItem = treeView.root ?: hiddenRoot
-                parentItem.children.removeIf { it.value == folder }
-                // Also remove from nested parents
-                for ((_, fItem) in folderTreeItems) {
-                    fItem.children.removeIf { it.value == folder }
-                }
+                onFolderRemoved?.invoke(folder)
             }
         }
 
