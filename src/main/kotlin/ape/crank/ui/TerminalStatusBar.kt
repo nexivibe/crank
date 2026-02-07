@@ -4,16 +4,25 @@ import ape.crank.model.ConnectionConfig
 import ape.crank.ssh.SshSessionWorker
 import javafx.geometry.Insets
 import javafx.geometry.Pos
+import javafx.scene.control.Button
 import javafx.scene.control.Label
+import javafx.scene.control.TextArea
+import javafx.scene.input.Clipboard
+import javafx.scene.input.ClipboardContent
+import javafx.scene.layout.BorderPane
 import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.Region
 import javafx.scene.paint.Color
 import javafx.scene.shape.Circle
+import javafx.stage.Modality
+import javafx.stage.Stage
+import javafx.scene.Scene
 
 /**
  * Status bar displayed directly below the terminal, showing connection state,
- * reconnect countdown, bytes transferred, data rate, and activity status.
+ * reconnect countdown, bytes transferred, data rate, activity status,
+ * and a clickable error button when errors exist.
  */
 class TerminalStatusBar : HBox(8.0) {
 
@@ -21,6 +30,9 @@ class TerminalStatusBar : HBox(8.0) {
     private val stateLabel = label("#808080")
     private val hostLabel = label("#A0A0A0")
     private val spacer = Region().also { HBox.setHgrow(it, Priority.ALWAYS) }
+
+    /** Cached reference to the current worker, used by the error button click handler. */
+    private var currentWorker: SshSessionWorker? = null
 
     init {
         alignment = Pos.CENTER_LEFT
@@ -32,6 +44,7 @@ class TerminalStatusBar : HBox(8.0) {
     }
 
     fun showNoSession() {
+        currentWorker = null
         children.clear()
         stateCircle.fill = Color.GRAY
         stateLabel.text = "No session selected"
@@ -45,6 +58,7 @@ class TerminalStatusBar : HBox(8.0) {
         inactivityThresholdMs: Long
     ) {
         children.clear()
+        currentWorker = worker
 
         if (worker == null || config == null) {
             showNoSession()
@@ -90,11 +104,31 @@ class TerminalStatusBar : HBox(8.0) {
             }
         }
 
-        // -- error message when disconnected
+        // -- error button (shown for DISCONNECTED, RECONNECTING, or CONNECTING with errors)
         val errorMsg = worker.lastErrorMessage
-        if (st == SshSessionWorker.State.DISCONNECTED && errorMsg != null) {
+        val errorCount = worker.getErrorHistorySnapshot().size
+        if (errorMsg != null && st != SshSessionWorker.State.CONNECTED) {
             children.add(sep())
-            children.add(label("#E04040", errorMsg))
+
+            // Truncate the inline message to keep the status bar readable
+            val shortError = if (errorMsg.length > 60) errorMsg.take(57) + "\u2026" else errorMsg
+            val errorButton = Button(
+                if (errorCount > 1) "\u26A0 $shortError ($errorCount errors)"
+                else "\u26A0 $shortError"
+            )
+            errorButton.style = """
+                -fx-background-color: transparent;
+                -fx-text-fill: #E04040;
+                -fx-font-size: 11;
+                -fx-padding: 0 4 0 4;
+                -fx-cursor: hand;
+                -fx-border-color: #E04040;
+                -fx-border-width: 1;
+                -fx-border-radius: 3;
+                -fx-background-radius: 3;
+            """.trimIndent()
+            errorButton.setOnAction { showErrorDialog(worker) }
+            children.add(errorButton)
         }
 
         // -- bytes transferred
@@ -129,10 +163,57 @@ class TerminalStatusBar : HBox(8.0) {
         }
     }
 
+    // ------------------------------------------------------------------ error dialog
+
+    private fun showErrorDialog(worker: SshSessionWorker) {
+        val report = worker.getFullErrorReport()
+
+        val textArea = TextArea(report)
+        textArea.isEditable = false
+        textArea.isWrapText = true
+        textArea.style = """
+            -fx-font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+            -fx-font-size: 12;
+            -fx-control-inner-background: #1E1E1E;
+            -fx-text-fill: #D4D4D4;
+        """.trimIndent()
+
+        val copyButton = Button("Copy to Clipboard")
+        copyButton.setOnAction {
+            val clipboard = Clipboard.getSystemClipboard()
+            val content = ClipboardContent()
+            content.putString(report)
+            clipboard.setContent(content)
+            copyButton.text = "Copied!"
+        }
+
+        val clearButton = Button("Clear Errors")
+        clearButton.setOnAction {
+            synchronized(worker.errorHistory) {
+                worker.errorHistory.clear()
+            }
+            textArea.text = "Errors cleared."
+        }
+
+        val buttonBar = HBox(8.0, copyButton, clearButton)
+        buttonBar.alignment = Pos.CENTER_RIGHT
+        buttonBar.padding = Insets(8.0, 0.0, 0.0, 0.0)
+
+        val root = BorderPane()
+        root.center = textArea
+        root.bottom = buttonBar
+        root.padding = Insets(12.0)
+        root.style = "-fx-background-color: #1E1E1E;"
+
+        val stage = Stage()
+        stage.title = "SSH Connection Errors"
+        stage.initModality(Modality.APPLICATION_MODAL)
+        stage.scene = Scene(root, 700.0, 500.0)
+        stage.show()
+    }
+
     /** Try to infer last data timestamp from the data rate window. */
     private fun getLastDataTimestamp(worker: SshSessionWorker): Long {
-        // If rate > 0, data arrived recently; otherwise idle since we don't have a direct timestamp.
-        // Use rate as a proxy: if rate > 0 in last 10s, consider active.
         return if (worker.getRecentDataRate() > 0) System.currentTimeMillis() else 0L
     }
 

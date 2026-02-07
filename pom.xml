@@ -253,6 +253,43 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- Copy BouncyCastle JARs to target/ (must stay signed for JCE) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-bc-jars</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy</goal>
+                        </goals>
+                        <configuration>
+                            <artifactItems>
+                                <artifactItem>
+                                    <groupId>org.bouncycastle</groupId>
+                                    <artifactId>bcprov-jdk18on</artifactId>
+                                    <version>${bouncycastle.version}</version>
+                                    <outputDirectory>${project.build.directory}</outputDirectory>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.bouncycastle</groupId>
+                                    <artifactId>bcpkix-jdk18on</artifactId>
+                                    <version>${bouncycastle.version}</version>
+                                    <outputDirectory>${project.build.directory}</outputDirectory>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.bouncycastle</groupId>
+                                    <artifactId>bcutil-jdk18on</artifactId>
+                                    <version>${bouncycastle.version}</version>
+                                    <outputDirectory>${project.build.directory}</outputDirectory>
+                                </artifactItem>
+                            </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Fat JAR: mvn package produces target/crank.jar (self-executable) -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -268,9 +305,20 @@
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>ape.crank.CrankLauncher</mainClass>
+                                    <manifestEntries>
+                                        <Class-Path>bcprov-jdk18on-${bouncycastle.version}.jar bcpkix-jdk18on-${bouncycastle.version}.jar bcutil-jdk18on-${bouncycastle.version}.jar</Class-Path>
+                                    </manifestEntries>
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
+                            <!-- Exclude BouncyCastle from shading — JCE requires signed JARs -->
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.bouncycastle:bcprov-jdk18on</exclude>
+                                    <exclude>org.bouncycastle:bcpkix-jdk18on</exclude>
+                                    <exclude>org.bouncycastle:bcutil-jdk18on</exclude>
+                                </excludes>
+                            </artifactSet>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>

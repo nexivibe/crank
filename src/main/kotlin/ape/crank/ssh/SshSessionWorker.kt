@@ -11,9 +11,15 @@ import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.keyprovider.FileKeyPairProvider
 import org.apache.sshd.common.session.SessionHeartbeatController
 import java.io.OutputStream
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.net.SocketAddress
+import java.nio.file.Files
 import java.nio.file.Paths
 import java.security.PublicKey
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -29,6 +35,21 @@ class SshSessionWorker(
     val sessionId: String
 ) {
     enum class State { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING }
+
+    /** A single error entry with full context. */
+    data class ErrorEntry(
+        val timestamp: Long,
+        val phase: String,
+        val message: String,
+        val fullTrace: String
+    ) {
+        fun format(): String {
+            val time = DateTimeFormatter.ofPattern("HH:mm:ss")
+                .withZone(ZoneId.systemDefault())
+                .format(Instant.ofEpochMilli(timestamp))
+            return "[$time] $phase: $message"
+        }
+    }
 
     // ------------------------------------------------------------------ callbacks
 
@@ -46,6 +67,10 @@ class SshSessionWorker(
     val bytesSent = AtomicLong(0)
     val bytesReceived = AtomicLong(0)
 
+    /** Recent errors, most recent last. Capped at 50 entries. */
+    val errorHistory: MutableList<ErrorEntry> = mutableListOf()
+        @Synchronized get
+
     // Data rate tracking
     private val recentChunks = mutableListOf<Pair<Long, Int>>()
 
@@ -58,6 +83,51 @@ class SshSessionWorker(
             val elapsed = (now - recentChunks.first().first).coerceAtLeast(1L)
             return total * 1000.0 / elapsed
         }
+    }
+
+    @Synchronized
+    private fun recordError(phase: String, e: Exception) {
+        val sw = StringWriter()
+        e.printStackTrace(PrintWriter(sw))
+        val message = buildErrorChain(e)
+        lastErrorMessage = message
+        errorHistory.add(ErrorEntry(System.currentTimeMillis(), phase, message, sw.toString()))
+        if (errorHistory.size > 50) errorHistory.removeAt(0)
+    }
+
+    /** Build a readable chain of causes. */
+    private fun buildErrorChain(e: Throwable): String {
+        val parts = mutableListOf<String>()
+        var current: Throwable? = e
+        val seen = mutableSetOf<Throwable>()
+        while (current != null && seen.add(current)) {
+            val msg = current.message ?: current.javaClass.simpleName
+            parts.add(msg)
+            current = current.cause
+        }
+        return parts.joinToString(" -> ")
+    }
+
+    @Synchronized
+    fun getErrorHistorySnapshot(): List<ErrorEntry> = errorHistory.toList()
+
+    @Synchronized
+    fun getFullErrorReport(): String {
+        if (errorHistory.isEmpty()) return "No errors recorded."
+        val sb = StringBuilder()
+        sb.appendLine("=== SSH Error Report for ${config.displayName()} ===")
+        sb.appendLine("Session ID: $sessionId")
+        sb.appendLine("Host: ${config.username}@${config.host}:${config.port}")
+        sb.appendLine("Key: ${config.privateKeyPath}")
+        sb.appendLine("Known Hosts Policy: ${config.knownHostsPolicy}")
+        sb.appendLine("Current State: ${currentState}")
+        sb.appendLine()
+        for ((i, entry) in errorHistory.withIndex()) {
+            sb.appendLine("--- Error ${i + 1} ---")
+            sb.appendLine(entry.format())
+            sb.appendLine(entry.fullTrace)
+        }
+        return sb.toString()
     }
 
     // ------------------------------------------------------------------ internal state
@@ -78,20 +148,41 @@ class SshSessionWorker(
      */
     fun connect() {
         if (shutdownRequested.get()) return
-        lastErrorMessage = null
         transition(State.CONNECTING)
 
         try {
-            val keyProvider = FileKeyPairProvider(Paths.get(config.privateKeyPath))
-            val keyPairs = keyProvider.loadKeys(null).toList()
-            if (keyPairs.isEmpty()) {
-                throw IllegalStateException("No key pairs loaded from ${config.privateKeyPath}")
+            // -- Load private key with diagnostics
+            val keyPath = Paths.get(config.privateKeyPath)
+            if (!Files.exists(keyPath)) {
+                throw IllegalStateException(
+                    "Private key file not found: ${config.privateKeyPath}"
+                )
             }
+
+            val keyProvider = FileKeyPairProvider(keyPath)
+            val keyPairs = try {
+                keyProvider.loadKeys(null).toList()
+            } catch (e: Exception) {
+                throw IllegalStateException(
+                    "Failed to load private key '${config.privateKeyPath}': ${e.message}" +
+                    " (if the key is passphrase-protected, Crank does not yet support encrypted keys)", e
+                )
+            }
+            if (keyPairs.isEmpty()) {
+                throw IllegalStateException(
+                    "No key pairs loaded from '${config.privateKeyPath}'. " +
+                    "Ensure the file contains a valid private key in OpenSSH, PEM, or PKCS8 format."
+                )
+            }
+
+            System.err.println(
+                "[SshSessionWorker:$sessionId] loaded ${keyPairs.size} key(s) " +
+                "from ${config.privateKeyPath} (${keyPairs.map { it.private.algorithm }})"
+            )
 
             val timeoutSec = config.connectionTimeoutSeconds.toLong()
 
-            // Synchronize verifier-set + connect to prevent races between sessions
-            // with different knownHostsPolicy values sharing the same SshClient.
+            // -- TCP connect + host key verification (serialized across workers)
             val newSession = synchronized(connectLock) {
                 client.serverKeyVerifier = buildKeyVerifier()
                 client.connect(config.username, config.host, config.port)
@@ -99,10 +190,17 @@ class SshSessionWorker(
                     .session
             }
 
+            // -- Authentication
             for (kp in keyPairs) {
                 newSession.addPublicKeyIdentity(kp)
             }
-            newSession.auth().verify(timeoutSec, TimeUnit.SECONDS)
+            try {
+                newSession.auth().verify(timeoutSec, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                throw IllegalStateException(
+                    "Authentication failed for ${config.username}@${config.host}:${config.port}: ${e.message}", e
+                )
+            }
 
             if (config.keepAliveIntervalSeconds > 0) {
                 newSession.setSessionHeartbeat(
@@ -111,6 +209,7 @@ class SshSessionWorker(
                 )
             }
 
+            // -- Open shell channel
             val shell = newSession.createShellChannel()
             shell.setPtyType("xterm-256color")
             shell.setPtyColumns(80)
@@ -128,12 +227,13 @@ class SshSessionWorker(
 
             reconnectAttempt.set(0)
             nextReconnectTimeMs = 0
+            lastErrorMessage = null
 
             transition(State.CONNECTED)
             startReaderThread(shell)
         } catch (e: Exception) {
-            lastErrorMessage = e.message ?: e.javaClass.simpleName
-            System.err.println("[SshSessionWorker:$sessionId] connect failed: ${e.message}")
+            recordError("connect", e)
+            System.err.println("[SshSessionWorker:$sessionId] connect failed: $lastErrorMessage")
             transition(State.DISCONNECTED)
             throw e
         }
@@ -232,8 +332,9 @@ class SshSessionWorker(
                     reconnectEnabled.set(false)
                     return@Thread
                 } catch (e: Exception) {
+                    recordError("reconnect attempt ${attempt + 1}", e)
                     System.err.println(
-                        "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} failed: ${e.message}"
+                        "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} failed: $lastErrorMessage"
                     )
                     transition(State.RECONNECTING)
                 }
@@ -326,7 +427,7 @@ class SshSessionWorker(
 
     private fun handleConnectionLost() {
         if (shutdownRequested.get()) return
-        lastErrorMessage = "Connection lost"
+        recordError("reader", Exception("Connection lost"))
         transition(State.DISCONNECTED)
         reconnectWithBackoff()
     }
