@@ -48,6 +48,12 @@ class MainWindow(private val stateManager: StateManager) {
         style = "-fx-text-fill: #808080; -fx-font-size: 16;"
     }
     private val terminalPane = StackPane(placeholderLabel)
+    private val missionTextField = TextField().apply {
+        promptText = "Mission notes for this session..."
+        style = "-fx-background-color: #2A2A2A; -fx-text-fill: #D0D0D0; -fx-prompt-text-fill: #606060; -fx-border-color: #3A3A3A; -fx-border-width: 0 0 1 0;"
+        isVisible = false
+        isManaged = false
+    }
     private val rightPane = BorderPane()
     private val splitPane = SplitPane()
     private val globalStatusBar = HBox(10.0)
@@ -61,6 +67,13 @@ class MainWindow(private val stateManager: StateManager) {
     private val sessionStateCache = mutableMapOf<String, SshSessionWorker.State>()
     private val sessionLastDataTimestamp = mutableMapOf<String, Long>()
     private var activityTimeline: Timeline? = null
+    private var stage: Stage? = null
+    private val missionChangeListener = javafx.beans.value.ChangeListener<String> { _, _, newValue ->
+        val sid = currentSessionId ?: return@ChangeListener
+        val session = stateManager.state.sessions.find { it.id == sid } ?: return@ChangeListener
+        session.mission = newValue ?: ""
+        stateManager.saveLater()
+    }
 
     // ------------------------------------------------------------------ init
 
@@ -88,6 +101,8 @@ class MainWindow(private val stateManager: StateManager) {
     // ------------------------------------------------------------------ scene builder
 
     fun buildScene(stage: Stage): Scene {
+        this.stage = stage
+
         val root = BorderPane()
         root.top = menuBar
         root.center = splitPane
@@ -138,6 +153,14 @@ class MainWindow(private val stateManager: StateManager) {
             stateManager.save()
             sessionTreeView.refresh(stateManager.state.sessions, stateManager.state.folders)
         }
+        sessionTreeView.onSessionMoved = { sessionId, newFolderId ->
+            val session = stateManager.state.sessions.find { it.id == sessionId }
+            if (session != null) {
+                session.folderId = newFolderId
+                stateManager.save()
+                sessionTreeView.refresh(stateManager.state.sessions, stateManager.state.folders)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ terminal widget
@@ -160,7 +183,12 @@ class MainWindow(private val stateManager: StateManager) {
         terminalPane.children.add(terminalWidget)
         terminalWidget.isVisible = false
 
-        rightPane.center = terminalPane
+        val terminalWithMission = VBox().apply {
+            children.addAll(missionTextField, terminalPane)
+            VBox.setVgrow(terminalPane, Priority.ALWAYS)
+        }
+
+        rightPane.center = terminalWithMission
         rightPane.bottom = terminalStatusBar
     }
 
@@ -203,6 +231,8 @@ class MainWindow(private val stateManager: StateManager) {
                 updateTerminalStatusBar()
                 checkActivityAndUpdateTree()
                 updateGlobalStatusBar()
+                updateWindowTitle()
+                updateBandwidthList()
             })
         )
         timeline.cycleCount = Timeline.INDEFINITE
@@ -244,6 +274,30 @@ class MainWindow(private val stateManager: StateManager) {
         }
         connectionCountLabel.text = "Connections: $totalConnections"
         activeCountLabel.text = "Active: $activeSessions / ${stateManager.state.sessions.size}"
+    }
+
+    private fun updateBandwidthList() {
+        val entries = stateManager.state.sessions.map { session ->
+            val worker = sshService.getWorker(session.id)
+            val state = sessionStateCache[session.id] ?: SshSessionWorker.State.DISCONNECTED
+            val rate = worker?.getRecentDataRate() ?: 0.0
+            SessionTreeView.BandwidthEntry(
+                sessionId = session.id,
+                sessionName = session.name,
+                state = state,
+                bytesPerSecond = rate
+            )
+        }
+        sessionTreeView.updateBandwidthList(entries)
+    }
+
+    private fun updateWindowTitle() {
+        val total = stateManager.state.sessions.size
+        val active = stateManager.state.sessions.count { session ->
+            sessionStateCache[session.id] == SshSessionWorker.State.CONNECTED
+        }
+        val title = if (total > 0) "Crank [$active/$total Active]" else "Crank"
+        stage?.title = title
     }
 
     // ------------------------------------------------------------------ public methods
@@ -324,7 +378,7 @@ class MainWindow(private val stateManager: StateManager) {
     }
 
     fun selectSession(sessionId: String) {
-        stateManager.state.sessions.find { it.id == sessionId } ?: return
+        val session = stateManager.state.sessions.find { it.id == sessionId } ?: return
 
         terminalWidget.detachSession()
         currentSessionId = sessionId
@@ -344,6 +398,13 @@ class MainWindow(private val stateManager: StateManager) {
         terminalWidget.attachSession(buffer, parser)
         terminalWidget.isVisible = true
         placeholderLabel.isVisible = false
+
+        // Show mission field and populate from session
+        missionTextField.textProperty().removeListener(missionChangeListener)
+        missionTextField.text = session.mission
+        missionTextField.isVisible = true
+        missionTextField.isManaged = true
+        missionTextField.textProperty().addListener(missionChangeListener)
 
         sessionTreeView.selectSession(sessionId)
         updateTerminalStatusBar()
@@ -395,6 +456,8 @@ class MainWindow(private val stateManager: StateManager) {
             terminalWidget.detachSession()
             terminalWidget.isVisible = false
             placeholderLabel.isVisible = true
+            missionTextField.isVisible = false
+            missionTextField.isManaged = false
             currentSessionId = null
             stateManager.state.lastSelectedSessionId = null
             terminalStatusBar.showNoSession()

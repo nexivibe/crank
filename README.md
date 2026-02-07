@@ -197,7 +197,7 @@ A: Because you crank the handle. You turn it up. You go full send. You don't sto
 
 ## License
 
-Do whatever you want with it. Go full crank.
+MIT License. Do whatever you want with it. Go full crank. See [LICENSE](LICENSE) for the fine print.
 
 ---
 

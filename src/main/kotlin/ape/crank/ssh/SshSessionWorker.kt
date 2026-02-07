@@ -77,7 +77,7 @@ class SshSessionWorker(
     fun getRecentDataRate(): Double {
         val now = System.currentTimeMillis()
         synchronized(recentChunks) {
-            recentChunks.removeAll { now - it.first > 10_000 }
+            recentChunks.removeAll { now - it.first > 5_000 }
             if (recentChunks.isEmpty()) return 0.0
             val total = recentChunks.sumOf { it.second.toLong() }
             val elapsed = (now - recentChunks.first().first).coerceAtLeast(1L)
@@ -231,6 +231,22 @@ class SshSessionWorker(
 
             transition(State.CONNECTED)
             startReaderThread(shell)
+
+            // Send initial command if configured, with template variable substitution
+            val cmd = config.initialCommand
+            if (!cmd.isNullOrBlank()) {
+                try {
+                    val expanded = cmd
+                        .replace("%UUID%", sessionId)
+                        .replace("%NAME%", config.name)
+                    val bytes = (expanded + "\n").toByteArray(Charsets.UTF_8)
+                    shell.invertedIn.write(bytes)
+                    shell.invertedIn.flush()
+                    bytesSent.addAndGet(bytes.size.toLong())
+                } catch (e: Exception) {
+                    System.err.println("[SshSessionWorker:$sessionId] initial command failed: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
             recordError("connect", e)
             System.err.println("[SshSessionWorker:$sessionId] connect failed: $lastErrorMessage")

@@ -35,6 +35,7 @@ class ConnectionDialog(
     private val keepAliveSpinner = Spinner<Int>(0, 3600, 30)
     private val connectionTimeoutSpinner = Spinner<Int>(1, 300, 30)
     private val compressionCheckBox = CheckBox("Enable compression")
+    private val initialCommandField = TextField()
     private val labelField = TextField()
     private val colorPicker = ColorPicker()
 
@@ -154,6 +155,17 @@ class ConnectionDialog(
 
         formPane.add(Label("Compression:"), 0, row)
         formPane.add(compressionCheckBox, 1, row)
+        row++
+
+        initialCommandField.promptText = "e.g. cd /app && tail -f logs/%UUID%.log"
+        formPane.add(Label("Initial Command:"), 0, row)
+        formPane.add(initialCommandField, 1, row)
+        row++
+
+        val initialCmdHelpLabel = Label("Variables: %UUID% = session ID, %NAME% = connection name")
+        initialCmdHelpLabel.style = "-fx-font-size: 11px; -fx-text-fill: #888888;"
+        formPane.add(Label(), 0, row)
+        formPane.add(initialCmdHelpLabel, 1, row)
         row++
 
         formPane.add(Label("Label:"), 0, row)
@@ -326,6 +338,12 @@ class ConnectionDialog(
             }
         }
 
+        initialCommandField.textProperty().addListener { _, _, newValue ->
+            if (!updatingForm) {
+                currentConnection?.initialCommand = newValue?.ifBlank { null }
+            }
+        }
+
         labelField.textProperty().addListener { _, _, newValue ->
             if (!updatingForm) {
                 currentConnection?.label = newValue?.ifBlank { null }
@@ -352,6 +370,7 @@ class ConnectionDialog(
         keepAliveSpinner.valueFactory.value = config.keepAliveIntervalSeconds
         connectionTimeoutSpinner.valueFactory.value = config.connectionTimeoutSeconds
         compressionCheckBox.isSelected = config.compression
+        initialCommandField.text = config.initialCommand ?: ""
         labelField.text = config.label ?: ""
         colorPicker.value = if (config.color != null) {
             try {
@@ -380,6 +399,7 @@ class ConnectionDialog(
         keepAliveSpinner.valueFactory.value = 30
         connectionTimeoutSpinner.valueFactory.value = 30
         compressionCheckBox.isSelected = false
+        initialCommandField.text = ""
         labelField.text = ""
         colorPicker.value = Color.WHITE
 
@@ -398,6 +418,7 @@ class ConnectionDialog(
         keepAliveSpinner.isDisable = disabled
         connectionTimeoutSpinner.isDisable = disabled
         compressionCheckBox.isDisable = disabled
+        initialCommandField.isDisable = disabled
         labelField.isDisable = disabled
         colorPicker.isDisable = disabled
     }

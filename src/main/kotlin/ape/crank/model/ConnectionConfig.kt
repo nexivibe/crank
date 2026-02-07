@@ -20,7 +20,8 @@ data class ConnectionConfig(
     var proxyHost: String? = null,
     var proxyPort: Int? = null,
     var label: String? = null,
-    var color: String? = null
+    var color: String? = null,
+    var initialCommand: String? = null
 ) {
     fun displayName(): String = name.ifEmpty { "$username@$host${if (port != 22) ":$port" else ""}" }
 

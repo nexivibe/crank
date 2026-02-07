@@ -8,7 +8,8 @@ data class TerminalSession(
     var connectionId: String = "",
     var folderId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    var order: Int = 0
+    var order: Int = 0,
+    var mission: String = ""
 )
 
 data class SessionFolder(

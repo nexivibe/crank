@@ -52,7 +52,7 @@ class CrankApplication : Application() {
         val scene = mainWindow.buildScene(stage)
 
         // Configure the stage
-        stage.title = "Crank - SSH Terminal Manager"
+        stage.title = "Crank"
         stage.scene = scene
         stage.minWidth = 800.0
         stage.minHeight = 600.0
