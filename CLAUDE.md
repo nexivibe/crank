@@ -32,11 +32,14 @@ ape.crank
 
 #### Two-Pane UI
 - **Left Panel**: Hierarchical TreeView of terminal sessions organized by project folders
-  - Each terminal node shows: UUID, display name, connection status indicator
+  - Each terminal node shows: UUID, display name, connection status indicator, bandwidth meter (5 blocks)
+  - Bandwidth meter: 5 fill blocks relative to the max bandwidth across all sessions (0 = idle, 5 = most active)
   - "New Terminal" button that requires selecting a connection configuration
-  - Drag-and-drop organization into folders
+  - Drag-and-drop organization into folders (drag sessions onto folders or empty space for root)
+  - Folder nodes show aggregated status: colored circle (green=all connected, orange=some, red=none, gray=empty) + count `(3/5)`
 - **Right Panel**: Full terminal emulator for the currently selected session
   - Complete VT100/xterm emulation (ncurses, colors, mouse, etc.)
+  - Editable mission line above terminal for per-session notes (auto-persisted)
 
 #### Connection Management
 - **Menu Bar** > **Settings** > **Connections** opens a management dialog
@@ -51,6 +54,7 @@ ape.crank
   - **Keep-Alive Interval** (seconds, default 30)
   - **Connection Timeout** (seconds, default 30)
   - **Compression** (enabled/disabled)
+  - **Initial Command** (template string executed on connect; supports `%UUID%` for session ID, `%NAME%` for connection name)
   - **Preferred Algorithms** (key exchange, cipher, MAC)
   - **Environment Variables** (key=value pairs to send)
   - **Proxy** (SOCKS5 / HTTP, optional)
@@ -71,11 +75,22 @@ ape.crank
   - Reconnect attempts are unlimited
 - **Connection Pool**: Manages up to 100+ concurrent SSH sessions efficiently
 
+#### Dynamic Window Title
+- Window title updates every 500ms: `"Crank [X/Y Active]"` (or just `"Crank"` when no sessions)
+
+#### Focus Mode
+- Toggle button in left panel toolbar
+- Bandwidth-sorted ListView replaces the tree as the primary navigation
+- Sorted ascending: idle sessions at top (sorted by name), active sessions below
+- Each entry shows: status circle, session name, data rate (idle / B/s / KB/s / MB/s)
+- Clicking an entry selects that session
+
 #### Terminal Activity Tracking
-- **Rate of Change Monitoring**: Tracks bytes/characters received per terminal per time window
+- **Rate of Change Monitoring**: Tracks bytes/characters received per terminal per 5-second sliding window
 - **Inactivity Detection**: Configurable threshold (e.g., 30s) to flag terminals as "inactive"
   - Filters out SSH keep-alive / heartbeat packets (trivial data)
   - Visual indicator in the tree view (dim/gray for inactive, bright for active)
+- **Bandwidth Meter**: 5-block visual meter per session in tree, relative to max across all sessions
 - **Last Activity Timestamp**: Displayed per terminal, shows when last meaningful data was received
 - **Screen Change Detection**: Monitors terminal buffer diffs, not just raw byte count
 
