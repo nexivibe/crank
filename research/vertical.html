@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRANK // Vertical Sync Strategy</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        arcade: {
+          black: '#0a0a0f',
+          dark: '#12121f',
+          panel: '#1a1a2e',
+          border: '#2a2a4a',
+          cyan: '#00fff5',
+          magenta: '#ff00ff',
+          pink: '#ff6ec7',
+          green: '#39ff14',
+          yellow: '#ffe600',
+          orange: '#ff6600',
+          blue: '#4d4dff',
+          purple: '#b347d9',
+          red: '#ff3333',
+          dim: '#6a6a8a',
+        }
+      },
+      fontFamily: {
+        pixel: ['"Press Start 2P"', 'monospace'],
+        mono: ['"Share Tech Mono"', 'monospace'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { background: #0a0a0f; }
+
+  /* Scanline overlay */
+  .scanlines::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.08) 2px,
+      rgba(0, 0, 0, 0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* Grid background */
+  .grid-bg {
+    background-image:
+      linear-gradient(rgba(0, 255, 245, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 255, 245, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Neon glow effects */
+  .glow-cyan { text-shadow: 0 0 10px rgba(0, 255, 245, 0.5), 0 0 40px rgba(0, 255, 245, 0.2); }
+  .glow-magenta { text-shadow: 0 0 10px rgba(255, 0, 255, 0.5), 0 0 40px rgba(255, 0, 255, 0.2); }
+  .glow-green { text-shadow: 0 0 10px rgba(57, 255, 20, 0.5), 0 0 40px rgba(57, 255, 20, 0.2); }
+  .glow-pink { text-shadow: 0 0 10px rgba(255, 110, 199, 0.5), 0 0 40px rgba(255, 110, 199, 0.2); }
+  .glow-yellow { text-shadow: 0 0 10px rgba(255, 230, 0, 0.5), 0 0 40px rgba(255, 230, 0, 0.2); }
+
+  .glow-border-cyan { box-shadow: 0 0 10px rgba(0, 255, 245, 0.15), inset 0 0 10px rgba(0, 255, 245, 0.05); }
+  .glow-border-magenta { box-shadow: 0 0 10px rgba(255, 0, 255, 0.15), inset 0 0 10px rgba(255, 0, 255, 0.05); }
+  .glow-border-green { box-shadow: 0 0 10px rgba(57, 255, 20, 0.15), inset 0 0 10px rgba(57, 255, 20, 0.05); }
+
+  /* Phase progress bar */
+  .phase-bar {
+    background: linear-gradient(90deg,
+      #39ff14 0%, #39ff14 20%,
+      #00fff5 20%, #00fff5 40%,
+      #ff6ec7 40%, #ff6ec7 60%,
+      #ff00ff 60%, #ff00ff 80%,
+      #ffe600 80%, #ffe600 100%
+    );
+  }
+
+  /* Table styling */
+  .arcade-table th {
+    background: rgba(0, 255, 245, 0.08);
+    border-bottom: 2px solid rgba(0, 255, 245, 0.3);
+  }
+  .arcade-table tr:hover td {
+    background: rgba(0, 255, 245, 0.04);
+  }
+  .arcade-table td, .arcade-table th {
+    border-right: 1px solid rgba(42, 42, 74, 0.5);
+  }
+  .arcade-table td:last-child, .arcade-table th:last-child {
+    border-right: none;
+  }
+
+  /* Code blocks */
+  .code-block {
+    background: #0d0d18;
+    border: 1px solid #2a2a4a;
+    box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.5);
+  }
+  .code-block code {
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.15);
+  }
+
+  /* Pixel corner decorations */
+  .pixel-corners {
+    position: relative;
+  }
+  .pixel-corners::before,
+  .pixel-corners::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+  }
+  .pixel-corners::before {
+    top: -1px; left: -1px;
+    border-top: 2px solid #00fff5;
+    border-left: 2px solid #00fff5;
+  }
+  .pixel-corners::after {
+    bottom: -1px; right: -1px;
+    border-bottom: 2px solid #ff00ff;
+    border-right: 2px solid #ff00ff;
+  }
+
+  /* Animated gradient line */
+  @keyframes gradientSlide {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  .gradient-line {
+    height: 2px;
+    background: linear-gradient(90deg, #00fff5, #ff00ff, #39ff14, #ff6ec7, #00fff5);
+    background-size: 200% 100%;
+    animation: gradientSlide 4s linear infinite;
+  }
+
+  /* Nav active indicator */
+  .nav-link {
+    position: relative;
+    transition: color 0.2s;
+  }
+  .nav-link::after {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    left: 0;
+    width: 0;
+    height: 2px;
+    background: #00fff5;
+    transition: width 0.2s;
+  }
+  .nav-link:hover::after {
+    width: 100%;
+  }
+
+  /* Badge pill */
+  .badge {
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    padding: 2px 8px;
+    border-radius: 2px;
+  }
+
+  /* Architecture diagram */
+  .arch-layer {
+    border: 1px solid #2a2a4a;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .arch-layer:hover {
+    border-color: rgba(0, 255, 245, 0.4);
+    box-shadow: 0 0 20px rgba(0, 255, 245, 0.08);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0a0a0f; }
+  ::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a5a; }
+
+  /* YES / NO badges in tables */
+  .yes-badge { color: #39ff14; }
+  .no-badge { color: #ff3333; }
+</style>
+</head>
+
+<body class="scanlines grid-bg text-gray-300 font-sans antialiased">
+
+<!-- ==================== STICKY NAV ==================== -->
+<nav class="fixed top-0 left-0 right-0 z-50 bg-arcade-black/90 backdrop-blur-md border-b border-arcade-border">
+  <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="font-pixel text-arcade-cyan text-xs glow-cyan tracking-wider">CRANK</span>
+      <span class="text-arcade-dim text-xs font-mono">//</span>
+      <span class="font-mono text-arcade-dim text-xs hidden sm:inline">VERTICAL SYNC STRATEGY</span>
+    </div>
+    <div class="flex items-center gap-5 text-xs font-mono">
+      <a href="#current" class="nav-link text-arcade-dim hover:text-arcade-cyan">STATUS</a>
+      <a href="#sftp" class="nav-link text-arcade-dim hover:text-arcade-cyan">SFTP</a>
+      <a href="#compare" class="nav-link text-arcade-dim hover:text-arcade-cyan">VS RSYNC</a>
+      <a href="#libraries" class="nav-link text-arcade-dim hover:text-arcade-cyan">LIBS</a>
+      <a href="#delta" class="nav-link text-arcade-dim hover:text-arcade-cyan">DELTA</a>
+      <a href="#phases" class="nav-link text-arcade-dim hover:text-arcade-cyan">PHASES</a>
+      <a href="#architecture" class="nav-link text-arcade-dim hover:text-arcade-cyan">ARCH</a>
+    </div>
+  </div>
+  <div class="gradient-line"></div>
+</nav>
+
+<!-- ==================== HERO ==================== -->
+<header class="pt-32 pb-20 px-6 text-center relative overflow-hidden">
+  <!-- Decorative grid circles -->
+  <div class="absolute inset-0 flex items-center justify-center opacity-[0.04] pointer-events-none">
+    <div class="w-[800px] h-[800px] border border-arcade-cyan rounded-full"></div>
+    <div class="absolute w-[600px] h-[600px] border border-arcade-magenta rounded-full"></div>
+    <div class="absolute w-[400px] h-[400px] border border-arcade-green rounded-full"></div>
+  </div>
+
+  <div class="relative max-w-4xl mx-auto">
+    <p class="font-mono text-arcade-magenta text-xs tracking-[0.3em] uppercase mb-6 glow-magenta">Strategy Document</p>
+    <h1 class="font-pixel text-3xl md:text-4xl text-white leading-relaxed mb-2">
+      <span class="text-arcade-cyan glow-cyan">VERTICAL</span>
+      <span class="text-arcade-dim mx-2">//</span>
+      <span class="text-arcade-pink glow-pink">FILE SYNC</span>
+    </h1>
+    <p class="font-pixel text-arcade-green text-xs mt-6 glow-green tracking-widest">STRATEGY</p>
+
+    <div class="mt-12 max-w-2xl mx-auto">
+      <p class="text-gray-400 leading-relaxed text-sm">
+        Crank already holds the hardest piece of the puzzle:
+        <span class="text-arcade-cyan font-medium">persistent, authenticated, multiplexed SSH sessions</span>
+        via Apache MINA SSHD. Adding file synchronization requires
+        <span class="text-arcade-green font-medium">one Maven dependency</span>
+        and <span class="text-arcade-yellow font-medium">zero new TCP connections</span>.
+      </p>
+    </div>
+
+    <!-- Stats row -->
+    <div class="mt-14 flex flex-wrap justify-center gap-6">
+      <div class="pixel-corners bg-arcade-panel border border-arcade-border px-6 py-4 min-w-[140px]">
+        <div class="font-pixel text-arcade-cyan text-lg glow-cyan">1</div>
+        <div class="font-mono text-arcade-dim text-[10px] mt-1 tracking-wider">DEPENDENCY</div>
+      </div>
+      <div class="pixel-corners bg-arcade-panel border border-arcade-border px-6 py-4 min-w-[140px]">
+        <div class="font-pixel text-arcade-green text-lg glow-green">0</div>
+        <div class="font-mono text-arcade-dim text-[10px] mt-1 tracking-wider">NEW TCP CONN</div>
+      </div>
+      <div class="pixel-corners bg-arcade-panel border border-arcade-border px-6 py-4 min-w-[140px]">
+        <div class="font-pixel text-arcade-magenta text-lg glow-magenta">5</div>
+        <div class="font-mono text-arcade-dim text-[10px] mt-1 tracking-wider">PHASES</div>
+      </div>
+      <div class="pixel-corners bg-arcade-panel border border-arcade-border px-6 py-4 min-w-[140px]">
+        <div class="font-pixel text-arcade-yellow text-lg glow-yellow">100%</div>
+        <div class="font-mono text-arcade-dim text-[10px] mt-1 tracking-wider">PURE JVM</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="gradient-line"></div>
+
+<main class="max-w-6xl mx-auto px-6 py-16 space-y-24">
+
+<!-- ==================== CURRENT POSITION ==================== -->
+<section id="current">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-cyan text-[10px] glow-cyan tracking-wider">01</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">CURRENT POSITION</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+  </div>
+
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden glow-border-cyan">
+    <table class="w-full text-sm arcade-table">
+      <thead>
+        <tr>
+          <th class="text-left font-mono text-arcade-cyan text-xs px-5 py-3 tracking-wider">ASSET</th>
+          <th class="text-left font-mono text-arcade-cyan text-xs px-5 py-3 tracking-wider">STATUS</th>
+        </tr>
+      </thead>
+      <tbody class="font-mono text-xs">
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">Apache MINA SSHD 2.12.1 <span class="text-arcade-dim">(sshd-core, sshd-common)</span></td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">IN POM.XML</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">Long-lived ClientSession per terminal</td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">SshSessionWorker</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">Key-based auth <span class="text-arcade-dim">(Ed25519, ECDSA, RSA, PEM, OpenSSH, PKCS8)</span></td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">WORKING</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">BouncyCastle 1.77 crypto provider</td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">INTEGRATED</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">Auto-reconnect with exponential backoff</td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">IMPLEMENTED</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-5 py-3 text-gray-300">100+ concurrent session management</td>
+          <td class="px-5 py-3"><span class="badge bg-arcade-green/10 text-arcade-green">ARCHITECTED</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mt-6 bg-arcade-dark border border-arcade-orange/30 rounded-sm px-5 py-4">
+    <p class="font-mono text-xs text-arcade-orange">
+      <span class="font-pixel text-[8px] mr-2">!</span>
+      MISSING TODAY: No sshd-sftp dependency, no sshd-scp dependency, no file transfer code of any kind.
+    </p>
+  </div>
+</section>
+
+<!-- ==================== SFTP / SCP ==================== -->
+<section id="sftp">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-green text-[10px] glow-green tracking-wider">02</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">THE EASY WIN</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">SCP &amp; SFTP</span>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <!-- SFTP Card -->
+    <div class="bg-arcade-panel border border-arcade-cyan/30 rounded-sm p-6 glow-border-cyan">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="badge bg-arcade-cyan/15 text-arcade-cyan font-pixel text-[8px]">RECOMMENDED</span>
+        <h3 class="font-pixel text-arcade-cyan text-[10px] glow-cyan">SFTP</h3>
+      </div>
+      <p class="text-gray-400 text-sm leading-relaxed mb-5">
+        One dependency unlocks the full SFTP subsystem. Channels multiplex over the existing
+        <code class="text-arcade-cyan font-mono text-xs">ClientSession</code> -- no new TCP connection,
+        no new SSH handshake, no new authentication.
+      </p>
+      <div class="code-block rounded-sm p-4 mb-5 overflow-x-auto">
+        <pre class="font-mono text-xs leading-relaxed"><code><span class="text-arcade-dim">&lt;dependency&gt;</span>
+  <span class="text-arcade-pink">&lt;groupId&gt;</span><span class="text-arcade-green">org.apache.sshd</span><span class="text-arcade-pink">&lt;/groupId&gt;</span>
+  <span class="text-arcade-pink">&lt;artifactId&gt;</span><span class="text-arcade-cyan">sshd-sftp</span><span class="text-arcade-pink">&lt;/artifactId&gt;</span>
+  <span class="text-arcade-pink">&lt;version&gt;</span><span class="text-arcade-yellow">${sshd.version}</span><span class="text-arcade-pink">&lt;/version&gt;</span>
+<span class="text-arcade-dim">&lt;/dependency&gt;</span></code></pre>
+      </div>
+      <ul class="space-y-2 text-xs font-mono text-gray-400">
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> Full directory listing, traversal, creation, removal</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> Random-access read/write (seek to offset)</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> File stat (size, mtime, permissions)</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> SFTP protocol versions 3-6 with auto-negotiation</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> Java NIO FileSystem integration</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-cyan mt-0.5">&#9654;</span> Rename, symlink, readlink</li>
+      </ul>
+    </div>
+
+    <!-- SCP Card -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm p-6">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="badge bg-arcade-dim/20 text-arcade-dim font-pixel text-[8px]">SECONDARY</span>
+        <h3 class="font-pixel text-arcade-dim text-[10px]">SCP</h3>
+      </div>
+      <p class="text-gray-500 text-sm leading-relaxed mb-5">
+        Simpler protocol for basic copy operations. Deprecated by OpenSSH 9.0+ (now uses SFTP internally).
+        Consider only for the remote-to-remote transfer helper.
+      </p>
+      <div class="code-block rounded-sm p-4 mb-5 overflow-x-auto">
+        <pre class="font-mono text-xs leading-relaxed"><code><span class="text-arcade-dim">&lt;dependency&gt;</span>
+  <span class="text-arcade-pink">&lt;groupId&gt;</span><span class="text-arcade-green">org.apache.sshd</span><span class="text-arcade-pink">&lt;/groupId&gt;</span>
+  <span class="text-arcade-pink">&lt;artifactId&gt;</span><span class="text-gray-400">sshd-scp</span><span class="text-arcade-pink">&lt;/artifactId&gt;</span>
+  <span class="text-arcade-pink">&lt;version&gt;</span><span class="text-arcade-yellow">${sshd.version}</span><span class="text-arcade-pink">&lt;/version&gt;</span>
+<span class="text-arcade-dim">&lt;/dependency&gt;</span></code></pre>
+      </div>
+      <ul class="space-y-2 text-xs font-mono text-gray-500">
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> ScpTransferEventListener for progress</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> Remote-to-remote copy helper</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> No directory listing</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> No random access / resume</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> No NIO FileSystem integration</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-dim mt-0.5">&#9654;</span> <span class="text-arcade-red">Deprecated upstream</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- SFTP vs SCP comparison table -->
+  <div class="mt-8">
+    <h3 class="font-pixel text-[10px] text-arcade-pink glow-pink tracking-wider mb-4">SFTP vs SCP HEAD-TO-HEAD</h3>
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto">
+      <table class="w-full text-xs arcade-table font-mono">
+        <thead>
+          <tr>
+            <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider min-w-[180px]">CRITERION</th>
+            <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">SFTP</th>
+            <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">SCP</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Directory listing</td>
+            <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+            <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Random access (seek)</td>
+            <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+            <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Resume interrupted transfer</td>
+            <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+            <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">NIO FileSystem</td>
+            <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+            <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Progress monitoring</td>
+            <td class="px-4 py-2.5 text-center text-gray-400">Streams</td>
+            <td class="px-4 py-2.5 text-center text-gray-400">Listener</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Remote-to-remote copy</td>
+            <td class="px-4 py-2.5 text-center no-badge">NO</td>
+            <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Protocol status</td>
+            <td class="px-4 py-2.5 text-center text-arcade-green">Active</td>
+            <td class="px-4 py-2.5 text-center text-arcade-red">Deprecated</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-4 py-2.5 text-gray-400">Delta / partial transfer</td>
+            <td class="px-4 py-2.5 text-center text-arcade-dim">No (full file)</td>
+            <td class="px-4 py-2.5 text-center text-arcade-dim">No (full file)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-4 text-xs font-mono text-arcade-dim">
+      <span class="text-arcade-cyan">VERDICT:</span> SFTP is the primary transport. Use SFTP for everything.
+    </p>
+  </div>
+
+  <!-- Code example -->
+  <div class="mt-8">
+    <h3 class="font-pixel text-[10px] text-arcade-green glow-green tracking-wider mb-4">CONNECTION REUSE</h3>
+    <div class="code-block rounded-sm p-5 overflow-x-auto">
+      <pre class="font-mono text-xs leading-relaxed"><code><span class="text-arcade-dim">// Reuse the terminal's existing session</span>
+<span class="text-arcade-pink">val</span> session: <span class="text-arcade-cyan">ClientSession</span> = sshSessionWorker.clientSession
+<span class="text-arcade-pink">val</span> sftp = <span class="text-arcade-cyan">SftpClientFactory</span>.instance().createSftpClient(session)
+
+<span class="text-arcade-dim">// Full filesystem operations</span>
+sftp.stat(<span class="text-arcade-green">"/remote/path"</span>)
+sftp.readDir(<span class="text-arcade-green">"/remote/dir"</span>)
+sftp.newInputStream(<span class="text-arcade-green">"/remote/file.txt"</span>)
+sftp.newOutputStream(<span class="text-arcade-green">"/remote/file.txt"</span>)
+
+<span class="text-arcade-dim">// Or mount as a Java NIO FileSystem</span>
+<span class="text-arcade-pink">val</span> remoteFs = <span class="text-arcade-cyan">SftpFileSystemProvider</span>.createFileSystem(session)
+<span class="text-arcade-pink">val</span> remotePath = remoteFs.getPath(<span class="text-arcade-green">"/remote/file.txt"</span>)
+<span class="text-arcade-cyan">Files</span>.copy(localPath, remotePath, <span class="text-arcade-yellow">StandardCopyOption.REPLACE_EXISTING</span>)</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== VS RSYNC ==================== -->
+<section id="compare">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-magenta text-[10px] glow-magenta tracking-wider">03</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">VS RSYNC</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">COMPETITIVE ANALYSIS</span>
+  </div>
+
+  <!-- How rsync works -->
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm p-6 mb-8">
+    <h3 class="font-pixel text-[10px] text-arcade-yellow glow-yellow tracking-wider mb-4">HOW RSYNC WORKS</h3>
+    <p class="text-gray-400 text-sm mb-5">
+      rsync is the gold standard. Its killer feature is the <span class="text-arcade-yellow font-medium">rolling checksum delta transfer algorithm</span>:
+      for a 1GB file with a 1KB change, rsync transfers ~one block (not 1GB).
+    </p>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+        <div class="font-pixel text-arcade-cyan text-[8px] mb-2">STEP 1</div>
+        <p class="text-xs text-gray-400 font-mono leading-relaxed">Receiver splits its copy into fixed blocks, computes weak + strong checksums per block</p>
+      </div>
+      <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+        <div class="font-pixel text-arcade-cyan text-[8px] mb-2">STEP 2</div>
+        <p class="text-xs text-gray-400 font-mono leading-relaxed">Sender scans its file with a sliding window matching against those checksums</p>
+      </div>
+      <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+        <div class="font-pixel text-arcade-cyan text-[8px] mb-2">STEP 3</div>
+        <p class="text-xs text-gray-400 font-mono leading-relaxed">Only non-matching literal data + block references are transmitted</p>
+      </div>
+      <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+        <div class="font-pixel text-arcade-cyan text-[8px] mb-2">STEP 4</div>
+        <p class="text-xs text-gray-400 font-mono leading-relaxed">Receiver reconstructs the file from its blocks + literal data</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- rsync pros / cons -->
+  <div class="grid md:grid-cols-2 gap-6 mb-8">
+    <div class="bg-arcade-dark border border-arcade-green/20 rounded-sm p-5">
+      <h4 class="font-pixel text-[9px] text-arcade-green glow-green mb-4">RSYNC ADVANTAGES</h4>
+      <ul class="space-y-2 text-xs font-mono text-gray-400">
+        <li class="flex items-start gap-2"><span class="text-arcade-green">+</span> Block-level delta transfer</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-green">+</span> <code class="text-arcade-cyan">--delete</code> for removing stale files</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-green">+</span> <code class="text-arcade-cyan">--partial</code> for resuming transfers</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-green">+</span> <code class="text-arcade-cyan">--checksum</code> integrity verification</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-green">+</span> Battle-tested, universally available</li>
+      </ul>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-red/20 rounded-sm p-5">
+      <h4 class="font-pixel text-[9px] text-arcade-red mb-4">RSYNC DISADVANTAGES</h4>
+      <ul class="space-y-2 text-xs font-mono text-gray-400">
+        <li class="flex items-start gap-2"><span class="text-arcade-red">-</span> Requires rsync binary on remote server</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-red">-</span> Not a library -- standalone process</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-red">-</span> No Java API (rsync4j is JNI, not pure JVM)</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-red">-</span> Complex protocol, tightly coupled transport</li>
+        <li class="flex items-start gap-2"><span class="text-arcade-red">-</span> New SSH connection per invocation</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Crank vs rsync table -->
+  <h3 class="font-pixel text-[10px] text-arcade-pink glow-pink tracking-wider mb-4">WHERE CRANK WINS</h3>
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto">
+    <table class="w-full text-xs arcade-table font-mono">
+      <thead>
+        <tr>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider min-w-[200px]">CAPABILITY</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider min-w-[140px]">RSYNC</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider min-w-[200px]">CRANK VERTICAL</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Connection reuse</td>
+          <td class="px-4 py-2.5 text-center text-arcade-red">New SSH per run</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Rides existing session</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Multi-host sync</td>
+          <td class="px-4 py-2.5 text-center text-arcade-dim">Manual scripting</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Built-in, one click</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Visual progress</td>
+          <td class="px-4 py-2.5 text-center text-arcade-red">No</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Bandwidth meters</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Bidirectional sync</td>
+          <td class="px-4 py-2.5 text-center text-arcade-red">Unidirectional only</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">With conflict resolution</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Continuous watch</td>
+          <td class="px-4 py-2.5 text-center text-arcade-dim">Needs inotify scripts</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Built-in WatchService</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">GUI conflict resolution</td>
+          <td class="px-4 py-2.5 text-center text-arcade-red">No</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">JavaFX dialogs</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Session-aware sync</td>
+          <td class="px-4 py-2.5 text-center text-arcade-red">No</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Persists with session</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Delta transfer</td>
+          <td class="px-4 py-2.5 text-center text-arcade-green">Block-level</td>
+          <td class="px-4 py-2.5 text-center text-arcade-yellow">Custom build (Phase 4)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mt-6 bg-arcade-dark border border-arcade-yellow/20 rounded-sm px-5 py-4">
+    <p class="font-mono text-xs text-arcade-yellow">
+      <span class="font-pixel text-[8px] mr-2">THE HONEST GAP</span>
+      Delta transfer. rsync's rolling checksum algorithm is the single feature that makes it irreplaceable for
+      large-file synchronization. Without it, Crank's sync is comparable to <code>rsync --whole-file</code>.
+    </p>
+  </div>
+</section>
+
+<!-- ==================== JAVA LIBRARIES ==================== -->
+<section id="libraries">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-pink text-[10px] glow-pink tracking-wider">04</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">JAVA LIBRARIES</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">LANDSCAPE</span>
+  </div>
+
+  <!-- SSH / SFTP Libraries -->
+  <h3 class="font-pixel text-[10px] text-arcade-cyan glow-cyan tracking-wider mb-4">SSH / SFTP LIBRARIES</h3>
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto mb-8">
+    <table class="w-full text-xs arcade-table font-mono">
+      <thead>
+        <tr>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">LIBRARY</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">VERSION</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">MAINTAINED</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">SFTP</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">SCP</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">LICENSE</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">FIT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t border-arcade-border/50 bg-arcade-cyan/[0.03]">
+          <td class="px-4 py-2.5 text-arcade-cyan font-semibold">Apache MINA SSHD</td>
+          <td class="px-4 py-2.5 text-gray-400">2.12.1</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center yes-badge">v3-6</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-gray-400">Apache 2.0</td>
+          <td class="px-4 py-2.5"><span class="badge bg-arcade-green/10 text-arcade-green">ALREADY IN USE</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">JSch (mwiede)</td>
+          <td class="px-4 py-2.5 text-gray-500">2.27.7</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-gray-500">BSD</td>
+          <td class="px-4 py-2.5 text-arcade-dim">Duplicates MINA</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">SSHJ</td>
+          <td class="px-4 py-2.5 text-gray-500">0.38.0</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center text-gray-500">v0-3</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-gray-500">Apache 2.0</td>
+          <td class="px-4 py-2.5 text-arcade-dim">Duplicates MINA</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Maverick Synergy</td>
+          <td class="px-4 py-2.5 text-gray-500">Active</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5 text-arcade-orange">LGPL/Comm.</td>
+          <td class="px-4 py-2.5 text-arcade-dim">License risk</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-500">Trilead SSH-2</td>
+          <td class="px-4 py-2.5 text-gray-600">build222</td>
+          <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          <td class="px-4 py-2.5 text-center text-gray-600">YES</td>
+          <td class="px-4 py-2.5 text-center text-gray-600">YES</td>
+          <td class="px-4 py-2.5 text-gray-600">BSD</td>
+          <td class="px-4 py-2.5 text-arcade-red">Abandoned</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Rsync / Delta Libraries -->
+  <h3 class="font-pixel text-[10px] text-arcade-magenta glow-magenta tracking-wider mb-4">RSYNC / DELTA TRANSFER LIBRARIES</h3>
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto mb-8">
+    <table class="w-full text-xs arcade-table font-mono">
+      <thead>
+        <tr>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">LIBRARY</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">FUNCTION</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">DELTA</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">TRANSPORT</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">LICENSE</th>
+          <th class="text-center px-4 py-3 text-arcade-cyan tracking-wider">PURE JVM</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">VERDICT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-arcade-yellow">Jarsync</td>
+          <td class="px-4 py-2.5 text-gray-400">Rolling checksum primitives</td>
+          <td class="px-4 py-2.5 text-center yes-badge">BLOCK</td>
+          <td class="px-4 py-2.5 text-gray-500">None (lib only)</td>
+          <td class="px-4 py-2.5 text-gray-400">LGPL-like</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5"><span class="badge bg-arcade-yellow/10 text-arcade-yellow">EXTRACT ALGO</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Yajsync</td>
+          <td class="px-4 py-2.5 text-gray-400">Full rsync client/server</td>
+          <td class="px-4 py-2.5 text-center yes-badge">BLOCK</td>
+          <td class="px-4 py-2.5 text-gray-500">Own TCP protocol</td>
+          <td class="px-4 py-2.5 text-arcade-red font-semibold">GPL-3.0</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5"><span class="badge bg-arcade-red/10 text-arcade-red">GPL BLOCKER</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-400">Fizzed Jsync</td>
+          <td class="px-4 py-2.5 text-gray-400">File-level sync over SFTP</td>
+          <td class="px-4 py-2.5 text-center text-arcade-dim">FILE</td>
+          <td class="px-4 py-2.5 text-gray-500">JSch SSH/SFTP</td>
+          <td class="px-4 py-2.5 text-gray-400">Apache 2.0</td>
+          <td class="px-4 py-2.5 text-center yes-badge">YES</td>
+          <td class="px-4 py-2.5"><span class="badge bg-arcade-cyan/10 text-arcade-cyan">ARCH REF</span></td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-2.5 text-gray-500">rsync4j</td>
+          <td class="px-4 py-2.5 text-gray-500">JNI wrapper for native rsync</td>
+          <td class="px-4 py-2.5 text-center text-gray-500">NATIVE</td>
+          <td class="px-4 py-2.5 text-gray-600">Native rsync</td>
+          <td class="px-4 py-2.5 text-arcade-red">GPL-3.0</td>
+          <td class="px-4 py-2.5 text-center no-badge">NO</td>
+          <td class="px-4 py-2.5 text-arcade-red">REJECT</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- What to leverage -->
+  <h3 class="font-pixel text-[10px] text-arcade-green glow-green tracking-wider mb-4">WHAT TO LEVERAGE</h3>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="bg-arcade-panel border border-arcade-cyan/20 rounded-sm p-5">
+      <div class="font-pixel text-[8px] text-arcade-cyan glow-cyan mb-3">01 // TRANSPORT</div>
+      <h4 class="text-sm text-white font-medium mb-2">MINA SSHD sshd-sftp</h4>
+      <p class="text-xs text-gray-400 leading-relaxed">One dependency, full SFTP, connection reuse. This is the foundation.</p>
+    </div>
+    <div class="bg-arcade-panel border border-arcade-yellow/20 rounded-sm p-5">
+      <div class="font-pixel text-[8px] text-arcade-yellow glow-yellow mb-3">02 // ALGORITHM</div>
+      <h4 class="text-sm text-white font-medium mb-2">Jarsync's Rolling Checksum</h4>
+      <p class="text-xs text-gray-400 leading-relaxed">~500 lines of well-documented algorithm. Reimplement in Kotlin -- own it, don't depend on it.</p>
+    </div>
+    <div class="bg-arcade-panel border border-arcade-pink/20 rounded-sm p-5">
+      <div class="font-pixel text-[8px] text-arcade-pink glow-pink mb-3">03 // DESIGN</div>
+      <h4 class="text-sm text-white font-medium mb-2">Fizzed Jsync's Architecture</h4>
+      <p class="text-xs text-gray-400 leading-relaxed">Reference for file-level comparison and sync orchestration. Study the API, build our own.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== DELTA TRANSFER PROBLEM ==================== -->
+<section id="delta">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-yellow text-[10px] glow-yellow tracking-wider">05</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">DELTA TRANSFER</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">THE HARD PROBLEM</span>
+  </div>
+
+  <p class="text-gray-400 text-sm mb-8 max-w-3xl">
+    The critical question: <span class="text-arcade-yellow font-medium">Is block-level delta transfer achievable
+    without requiring anything on the remote server?</span>
+  </p>
+
+  <div class="space-y-6">
+    <!-- Approach A -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[8px] text-arcade-cyan glow-cyan">A</span>
+        <h4 class="font-mono text-xs text-white tracking-wider">SFTP-ONLY DELTA</h4>
+        <span class="badge bg-arcade-dim/20 text-arcade-dim ml-auto">NO REMOTE TOOLING</span>
+      </div>
+      <div class="p-5 space-y-3 text-xs font-mono text-gray-400">
+        <div class="flex gap-3">
+          <span class="text-arcade-cyan font-pixel text-[8px] mt-0.5 shrink-0">01</span>
+          <p>Read remote file in blocks via SFTP <code class="text-arcade-cyan">seek + read</code>, compute rolling + strong checksums locally for each block. Cache signatures.</p>
+        </div>
+        <div class="flex gap-3">
+          <span class="text-arcade-cyan font-pixel text-[8px] mt-0.5 shrink-0">02</span>
+          <p>Run rolling checksum sliding window over local file, matching against remote block signatures.</p>
+        </div>
+        <div class="flex gap-3">
+          <span class="text-arcade-cyan font-pixel text-[8px] mt-0.5 shrink-0">03</span>
+          <p>Use SFTP <code class="text-arcade-cyan">seek + write</code> to overwrite only the changed blocks on the remote file.</p>
+        </div>
+        <div class="mt-4 bg-arcade-dark border border-arcade-yellow/20 rounded-sm px-4 py-3 text-arcade-yellow">
+          Tradeoff: First sync downloads all remote data to compute signatures. Subsequent syncs use cached signatures.
+        </div>
+      </div>
+    </div>
+
+    <!-- Approach B -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[8px] text-arcade-magenta glow-magenta">B</span>
+        <h4 class="font-mono text-xs text-white tracking-wider">SSH EXEC CHECKSUM HELPER</h4>
+        <span class="badge bg-arcade-dim/20 text-arcade-dim ml-auto">LIGHTWEIGHT REMOTE</span>
+      </div>
+      <div class="p-5">
+        <p class="text-xs font-mono text-gray-400 mb-4">Use SSH exec channels to run checksum commands on the remote -- no file download needed:</p>
+        <div class="code-block rounded-sm p-4 overflow-x-auto mb-4">
+          <pre class="font-mono text-xs leading-relaxed"><code><span class="text-arcade-dim">// Fast: get file checksum without downloading</span>
+<span class="text-arcade-pink">val</span> channel = session.createExecChannel(<span class="text-arcade-green">"sha256sum /remote/file.txt"</span>)
+
+<span class="text-arcade-dim">// Or use a Python one-liner for block signatures</span>
+<span class="text-arcade-pink">val</span> channel = session.createExecChannel(<span class="text-arcade-green">"""
+  python3 -c 'import hashlib,sys
+  bs=65536
+  with open(sys.argv[1],"rb") as f:
+    while b:=f.read(bs):
+      print(f"{sum(b)&0xFFFFFFFF},{hashlib.md5(b).hexdigest()}")
+  ' /remote/file.txt
+"""</span>)</code></pre>
+        </div>
+        <div class="bg-arcade-dark border border-arcade-cyan/20 rounded-sm px-4 py-3 text-xs font-mono text-arcade-cyan">
+          Available on &gt;99% of Linux servers. No deployment, no installation.
+        </div>
+      </div>
+    </div>
+
+    <!-- Approach C -->
+    <div class="bg-arcade-panel border border-arcade-green/30 rounded-sm overflow-hidden glow-border-green">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-green/20 bg-arcade-dark">
+        <span class="font-pixel text-[8px] text-arcade-green glow-green">C</span>
+        <h4 class="font-mono text-xs text-white tracking-wider">HYBRID</h4>
+        <span class="badge bg-arcade-green/15 text-arcade-green ml-auto">RECOMMENDED</span>
+      </div>
+      <div class="p-5">
+        <div class="grid sm:grid-cols-3 gap-4">
+          <div class="bg-arcade-dark rounded-sm p-4 border border-arcade-border">
+            <div class="font-pixel text-[8px] text-arcade-green glow-green mb-2">FIRST</div>
+            <p class="text-xs font-mono text-gray-400">Try remote checksumming via SSH exec -- fast, bandwidth-efficient</p>
+          </div>
+          <div class="bg-arcade-dark rounded-sm p-4 border border-arcade-border">
+            <div class="font-pixel text-[8px] text-arcade-yellow glow-yellow mb-2">FALLBACK</div>
+            <p class="text-xs font-mono text-gray-400">SFTP-only delta if remote tools unavailable -- universal compatibility</p>
+          </div>
+          <div class="bg-arcade-dark rounded-sm p-4 border border-arcade-border">
+            <div class="font-pixel text-[8px] text-arcade-cyan glow-cyan mb-2">SKIP</div>
+            <p class="text-xs font-mono text-gray-400">Transfer small files (&lt;1MB) in full via SFTP -- not worth delta overhead</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== PHASES ==================== -->
+<section id="phases">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-cyan text-[10px] glow-cyan tracking-wider">06</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">INVESTMENT PHASES</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">PATH TO COMPETITIVE</span>
+  </div>
+
+  <!-- Phase progress bar -->
+  <div class="mb-10">
+    <div class="flex text-[8px] font-pixel tracking-wider mb-2">
+      <div class="w-1/5 text-arcade-green glow-green">MVP</div>
+      <div class="w-1/5 text-arcade-cyan glow-cyan">SYNC</div>
+      <div class="w-1/5 text-arcade-pink glow-pink">BIDIR</div>
+      <div class="w-1/5 text-arcade-magenta glow-magenta">DELTA</div>
+      <div class="w-1/5 text-arcade-yellow glow-yellow text-right">WATCH</div>
+    </div>
+    <div class="h-1 bg-arcade-border rounded-full overflow-hidden">
+      <div class="phase-bar h-full rounded-full"></div>
+    </div>
+    <div class="flex text-[9px] font-mono text-arcade-dim mt-2">
+      <div class="w-1/5">1-2 wks</div>
+      <div class="w-1/5">3-5 wks</div>
+      <div class="w-1/5">5-8 wks</div>
+      <div class="w-1/5">8-12 wks</div>
+      <div class="w-1/5 text-right">10-15 wks</div>
+    </div>
+  </div>
+
+  <div class="space-y-5">
+    <!-- Phase 1 -->
+    <div class="bg-arcade-panel border border-arcade-green/30 rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-green/20 bg-arcade-dark">
+        <span class="font-pixel text-[10px] text-arcade-green glow-green">PHASE 1</span>
+        <span class="font-mono text-xs text-white tracking-wider">FILE BROWSER + BASIC TRANSFER</span>
+        <span class="ml-auto font-mono text-[10px] text-arcade-green">1-2 WEEKS</span>
+      </div>
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">DELIVERS</h5>
+          <ul class="space-y-1.5 text-xs font-mono text-gray-400">
+            <li class="flex items-start gap-2"><span class="text-arcade-green">&#9654;</span> Add <code class="text-arcade-cyan">sshd-sftp</code> dependency</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-green">&#9654;</span> SFTP file browser panel in Crank UI</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-green">&#9654;</span> Upload / download files and directories</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-green">&#9654;</span> Progress tracking via bandwidth meters</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-green">&#9654;</span> Drag-and-drop from local file manager</li>
+          </ul>
+        </div>
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">COMPETITIVE POSITION</h5>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            Equivalent to <span class="text-white">WinSCP / FileZilla</span> but integrated into the terminal session --
+            no separate connection, no separate authentication. Zero additional setup.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[10px] text-arcade-cyan glow-cyan">PHASE 2</span>
+        <span class="font-mono text-xs text-white tracking-wider">FILE-LEVEL SYNC</span>
+        <span class="ml-auto font-mono text-[10px] text-arcade-cyan">+2-3 WKS &rarr; 3-5 TOTAL</span>
+      </div>
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">DELIVERS</h5>
+          <ul class="space-y-1.5 text-xs font-mono text-gray-400">
+            <li class="flex items-start gap-2"><span class="text-arcade-cyan">&#9654;</span> Sync mappings: local dir &harr; remote dir</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-cyan">&#9654;</span> File-level comparison (mtime + size)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-cyan">&#9654;</span> Unidirectional sync (push / pull)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-cyan">&#9654;</span> .gitignore-style ignore patterns</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-cyan">&#9654;</span> Sync status per session + history log</li>
+          </ul>
+        </div>
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">COMPETITIVE POSITION</h5>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            Equivalent to <code class="text-arcade-cyan">rsync --whole-file</code> or Fizzed Jsync.
+            Handles <span class="text-white">80% of sync use cases</span>. Loses to rsync only on large files with small changes.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[10px] text-arcade-pink glow-pink">PHASE 3</span>
+        <span class="font-mono text-xs text-white tracking-wider">BIDIRECTIONAL SYNC + CONFLICTS</span>
+        <span class="ml-auto font-mono text-[10px] text-arcade-pink">+2-3 WKS &rarr; 5-8 TOTAL</span>
+      </div>
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">DELIVERS</h5>
+          <ul class="space-y-1.5 text-xs font-mono text-gray-400">
+            <li class="flex items-start gap-2"><span class="text-arcade-pink">&#9654;</span> Three-way comparison (local vs baseline vs remote)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-pink">&#9654;</span> Conflict detection + resolution UI in JavaFX</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-pink">&#9654;</span> Strategies: newest-wins, local-wins, manual</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-pink">&#9654;</span> Baseline state persistence (JSON)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-pink">&#9654;</span> Atomic sync ops (temp file + rename)</li>
+          </ul>
+        </div>
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">COMPETITIVE POSITION</h5>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            <span class="text-white">Surpasses rsync</span> (unidirectional only). Comparable to
+            <span class="text-white">Unison</span> but with a GUI and integrated into the SSH session.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[10px] text-arcade-magenta glow-magenta">PHASE 4</span>
+        <span class="font-mono text-xs text-white tracking-wider">DELTA TRANSFER ENGINE</span>
+        <span class="ml-auto font-mono text-[10px] text-arcade-magenta">+3-4 WKS &rarr; 8-12 TOTAL</span>
+      </div>
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">DELIVERS</h5>
+          <ul class="space-y-1.5 text-xs font-mono text-gray-400">
+            <li class="flex items-start gap-2"><span class="text-arcade-magenta">&#9654;</span> Rolling checksum (Adler32) + SHA-256 engine in Kotlin</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-magenta">&#9654;</span> Block signature generation + delta computation</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-magenta">&#9654;</span> Hybrid: SSH exec remote checksums + SFTP fallback</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-magenta">&#9654;</span> Auto-tuned block sizes</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-magenta">&#9654;</span> Delta transfer for files &gt;1MB</li>
+          </ul>
+        </div>
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">COMPETITIVE POSITION</h5>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            <span class="text-white">Matches rsync's core efficiency</span>. Combined with bidirectional sync and GUI,
+            this surpasses rsync for interactive use cases.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-hidden">
+      <div class="flex items-center gap-3 px-5 py-3 border-b border-arcade-border bg-arcade-dark">
+        <span class="font-pixel text-[10px] text-arcade-yellow glow-yellow">PHASE 5</span>
+        <span class="font-mono text-xs text-white tracking-wider">CONTINUOUS WATCH + REAL-TIME SYNC</span>
+        <span class="ml-auto font-mono text-[10px] text-arcade-yellow">+2-3 WKS &rarr; 10-15 TOTAL</span>
+      </div>
+      <div class="p-5 grid md:grid-cols-2 gap-6">
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">DELIVERS</h5>
+          <ul class="space-y-1.5 text-xs font-mono text-gray-400">
+            <li class="flex items-start gap-2"><span class="text-arcade-yellow">&#9654;</span> Java NIO WatchService for local monitoring</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-yellow">&#9654;</span> Remote polling (periodic stat via SFTP)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-yellow">&#9654;</span> Automatic incremental sync on changes</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-yellow">&#9654;</span> Debounced sync (no thrashing)</li>
+            <li class="flex items-start gap-2"><span class="text-arcade-yellow">&#9654;</span> Configurable watch patterns + exclusions</li>
+          </ul>
+        </div>
+        <div>
+          <h5 class="font-mono text-[10px] text-arcade-dim tracking-wider mb-3">COMPETITIVE POSITION</h5>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            Equivalent to <code class="text-arcade-yellow">lsyncd</code> or <code class="text-arcade-yellow">watchman + rsync</code>
+            but fully integrated, cross-platform, and GUI-driven. Crank becomes a
+            <span class="text-white">development workflow tool</span>, not just a terminal manager.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Competitive Landscape Table -->
+  <div class="mt-12">
+    <h3 class="font-pixel text-[10px] text-arcade-cyan glow-cyan tracking-wider mb-4">COMPETITIVE LANDSCAPE</h3>
+    <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto">
+      <table class="w-full text-[11px] arcade-table font-mono whitespace-nowrap">
+        <thead>
+          <tr>
+            <th class="text-left px-3 py-3 text-arcade-cyan tracking-wider">TOOL</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">XFER</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">DELTA</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">BIDIR</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">GUI</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">SESSION</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">JVM</th>
+            <th class="text-center px-3 py-3 text-arcade-cyan tracking-wider">WATCH</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">rsync</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">BLOCK</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">Unison</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">BLOCK</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">BASIC</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">lsyncd</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">VIA RSYNC</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">WinSCP</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">OWN</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">BASIC</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">FileZilla</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">OWN</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-border/50">
+            <td class="px-3 py-2 text-gray-400">Fizzed Jsync</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">FILE</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-cyan/20 bg-arcade-cyan/[0.03]">
+            <td class="px-3 py-2 text-arcade-green font-semibold">Crank P1</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-cyan/20 bg-arcade-cyan/[0.04]">
+            <td class="px-3 py-2 text-arcade-cyan font-semibold">Crank P3</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center text-arcade-dim">FILE</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center no-badge">&#10007;</td>
+          </tr>
+          <tr class="border-t border-arcade-cyan/30 bg-arcade-cyan/[0.06]">
+            <td class="px-3 py-2 text-arcade-yellow font-semibold glow-yellow">Crank P5</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">BLOCK</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+            <td class="px-3 py-2 text-center yes-badge">&#10003;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-4 bg-arcade-dark border border-arcade-green/20 rounded-sm px-5 py-4">
+      <p class="font-mono text-xs text-arcade-green">
+        Crank at Phase 5 is the <span class="text-white font-medium">only tool</span> combining block-level delta transfer,
+        bidirectional sync, GUI conflict resolution, persistent SSH session reuse, pure JVM portability, and real-time watch mode.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== ARCHITECTURE ==================== -->
+<section id="architecture">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-green text-[10px] glow-green tracking-wider">07</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">ARCHITECTURE</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+    <span class="font-mono text-arcade-dim text-[10px]">VERTICAL SYNC ENGINE</span>
+  </div>
+
+  <!-- Stack diagram -->
+  <div class="space-y-2 mb-10">
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-pink">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-pink glow-pink">UI</span>
+        <span class="font-mono text-xs text-white">Crank UI (JavaFX)</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <span class="badge bg-arcade-pink/10 text-arcade-pink font-mono">Sync Panel</span>
+        <span class="badge bg-arcade-pink/10 text-arcade-pink font-mono">File Browser</span>
+        <span class="badge bg-arcade-pink/10 text-arcade-pink font-mono">Conflict Dialog</span>
+        <span class="badge bg-arcade-pink/10 text-arcade-pink font-mono">Progress Meter</span>
+      </div>
+    </div>
+
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-magenta">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-magenta glow-magenta">ORCH</span>
+        <span class="font-mono text-xs text-white">Sync Orchestrator</span>
+      </div>
+      <p class="text-xs font-mono text-gray-500">Bidirectional three-way merge &bull; Conflict detection &bull; Sync mapping management &bull; Ignore patterns (.crankignore)</p>
+    </div>
+
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-yellow">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-yellow glow-yellow">DELTA</span>
+        <span class="font-mono text-xs text-white">Delta Transfer Engine</span>
+      </div>
+      <p class="text-xs font-mono text-gray-500">Rolling checksum (Adler32) &bull; Strong hash (SHA-256) &bull; Block signatures &bull; Delta computation &bull; Delta application</p>
+    </div>
+
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-orange">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-orange">INDEX</span>
+        <span class="font-mono text-xs text-white">File Metadata Index</span>
+      </div>
+      <p class="text-xs font-mono text-gray-500">Per-mapping baseline state &bull; mtime, size, checksum cache &bull; JSON persistence</p>
+    </div>
+
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-cyan">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan glow-cyan">XPORT</span>
+        <span class="font-mono text-xs text-white">Transport Layer (MINA SSHD)</span>
+      </div>
+      <p class="text-xs font-mono text-gray-500">SftpClient (list, read, write, stat, seek) &bull; SSH Exec Channel (remote checksums) &bull; Connection reuse</p>
+    </div>
+
+    <div class="arch-layer bg-arcade-panel rounded-sm p-4 border-l-2 border-l-arcade-green">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-green glow-green">BASE</span>
+        <span class="font-mono text-xs text-white">Existing Crank Infrastructure</span>
+      </div>
+      <p class="text-xs font-mono text-gray-500">SshSessionWorker &bull; Auto-reconnect &bull; Activity tracking &bull; Bandwidth meters</p>
+    </div>
+  </div>
+
+  <!-- Design decisions -->
+  <h3 class="font-pixel text-[10px] text-arcade-cyan glow-cyan tracking-wider mb-5">KEY DESIGN DECISIONS</h3>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">01</span>
+        <span class="text-xs text-white font-medium">SFTP over SCP</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">SCP is deprecated by OpenSSH. SFTP provides directory ops, random access, and NIO FileSystem integration.</p>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">02</span>
+        <span class="text-xs text-white font-medium">Connection reuse is non-negotiable</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">Sync rides the existing terminal session. No new connections, no new auth, no new host key verification.</p>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">03</span>
+        <span class="text-xs text-white font-medium">Delta transfer is optional but strategic</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">File-level sync covers most use cases. Delta transfer is the differentiator that makes Crank competitive with rsync.</p>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">04</span>
+        <span class="text-xs text-white font-medium">Build rolling checksum in Kotlin</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">Jarsync is archived. Yajsync is GPL. The algorithm is ~500 lines and well-documented. Own it.</p>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">05</span>
+        <span class="text-xs text-white font-medium">Hybrid remote checksumming</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">Try SSH exec first (fast, no download), fall back to SFTP block reads (universal). Degrade gracefully.</p>
+    </div>
+    <div class="bg-arcade-dark border border-arcade-border rounded-sm p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-pixel text-[8px] text-arcade-cyan">06</span>
+        <span class="text-xs text-white font-medium">Bidirectional sync is the moat</span>
+      </div>
+      <p class="text-[11px] text-gray-500 font-mono leading-relaxed">rsync is unidirectional. Unison has no GUI. Crank owns the bidirectional + visual conflict resolution niche.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== RISK ASSESSMENT ==================== -->
+<section>
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-red text-[10px] tracking-wider">08</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">RISK ASSESSMENT</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+  </div>
+
+  <div class="bg-arcade-panel border border-arcade-border rounded-sm overflow-x-auto">
+    <table class="w-full text-xs arcade-table font-mono">
+      <thead>
+        <tr>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider min-w-[200px]">RISK</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider min-w-[120px]">IMPACT</th>
+          <th class="text-left px-4 py-3 text-arcade-cyan tracking-wider">MITIGATION</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">SFTP subsystem disabled on server</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-yellow/10 text-arcade-yellow">MEDIUM</span></td>
+          <td class="px-4 py-3 text-gray-400">Fall back to SCP; detect and inform user</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">Delta transfer bugs</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-red/10 text-arcade-red">HIGH</span></td>
+          <td class="px-4 py-3 text-gray-400">Atomic writes (temp + rename), checksums before/after, extensive testing</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">Bidirectional UX complexity</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-yellow/10 text-arcade-yellow">MEDIUM</span></td>
+          <td class="px-4 py-3 text-gray-400">Default to safe strategies (prompt on conflict), clear visual diff</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">100+ sessions syncing at scale</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-yellow/10 text-arcade-yellow">MEDIUM</span></td>
+          <td class="px-4 py-3 text-gray-400">Throttle concurrent SFTP channels, queue sync ops, configurable parallelism</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">MINA SSHD 3.0 breaking changes</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-dim/20 text-arcade-dim">LOW</span></td>
+          <td class="px-4 py-3 text-gray-400">Stay on 2.x stable; 3.0 is milestone pre-release, no urgency</td>
+        </tr>
+        <tr class="border-t border-arcade-border/50">
+          <td class="px-4 py-3 text-gray-300">Multi-GB file memory pressure</td>
+          <td class="px-4 py-3"><span class="badge bg-arcade-yellow/10 text-arcade-yellow">MEDIUM</span></td>
+          <td class="px-4 py-3 text-gray-400">Stream-based processing, never buffer entire files, configurable block sizes</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== CONCLUSION ==================== -->
+<section class="pb-8">
+  <div class="flex items-center gap-4 mb-8">
+    <span class="font-pixel text-arcade-magenta text-[10px] glow-magenta tracking-wider">09</span>
+    <h2 class="font-pixel text-white text-sm tracking-wide">CONCLUSION</h2>
+    <div class="flex-1 h-px bg-arcade-border"></div>
+  </div>
+
+  <div class="bg-arcade-panel border border-arcade-cyan/20 rounded-sm p-8 glow-border-cyan max-w-4xl">
+    <p class="text-gray-300 text-sm leading-relaxed mb-6">
+      Adding file synchronization to Crank is a <span class="text-arcade-cyan font-medium">high-leverage vertical integration</span>.
+      The hardest part (persistent SSH session management) is already done. The SFTP transport is
+      <span class="text-arcade-green font-medium">one Maven dependency away</span>. The investment to reach rsync-competitive
+      capability is <span class="text-arcade-yellow font-medium">8-12 weeks</span>, with useful milestones at every phase.
+    </p>
+    <p class="text-gray-300 text-sm leading-relaxed mb-8">
+      Crank becomes the <span class="text-white font-medium">only tool</span> that combines multi-session SSH terminal management
+      with integrated, bidirectional, delta-efficient file synchronization -- all in a single pure-JVM application
+      with a visual interface.
+    </p>
+
+    <div class="bg-arcade-dark border border-arcade-green/30 rounded-sm p-5">
+      <div class="font-pixel text-[9px] text-arcade-green glow-green mb-3 tracking-wider">RECOMMENDED STARTING POINT</div>
+      <p class="font-mono text-xs text-gray-400 leading-relaxed">
+        Add <code class="text-arcade-cyan">sshd-sftp</code> to pom.xml, create a <code class="text-arcade-cyan">sync/</code> package under
+        <code class="text-arcade-cyan">ape.crank</code>, and build Phase 1 (file browser + basic transfer).
+        <span class="text-arcade-green">Ship it.</span> Then iterate toward delta sync based on user demand.
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ==================== FOOTER ==================== -->
+<div class="gradient-line"></div>
+<footer class="max-w-6xl mx-auto px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+  <div class="flex items-center gap-3">
+    <span class="font-pixel text-arcade-cyan text-[8px] glow-cyan">CRANK</span>
+    <span class="text-arcade-dim font-mono text-[10px]">// SSH Terminal Manager</span>
+  </div>
+  <div class="font-mono text-[10px] text-arcade-dim">
+    Pure JVM &bull; Kotlin + JavaFX &bull; Apache MINA SSHD
+  </div>
+</footer>
+
+</body>
+</html>
