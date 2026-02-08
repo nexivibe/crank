@@ -253,6 +253,20 @@ class TerminalWidget : Region() {
         return buffer?.scrollback?.size ?: 0
     }
 
+    /**
+     * Snap back to the live terminal view (bottom of scrollback).
+     * Called automatically when the user sends input while scrolled into history.
+     */
+    private fun snapToLive() {
+        if (scrollOffset != 0) {
+            scrollOffset = 0
+            selectionActive = false
+            lastRenderedVersion = -1L
+            requestRender()
+            onScrollChanged?.invoke(0, buffer?.scrollback?.size ?: 0)
+        }
+    }
+
     fun clearSelection() {
         selectionActive = false
         lastRenderedVersion = -1L
@@ -491,10 +505,17 @@ class TerminalWidget : Region() {
     private fun handleKeyPressed(event: KeyEvent) {
         val buf = buffer ?: return
 
-        // Clipboard mode: intercept Ctrl+C/V before normal Ctrl+key handling
+        // Snap to live view on any user input (except modifier-only keys)
+        if (!event.code.isModifierKey) {
+            snapToLive()
+        }
+
+        // Clipboard mode: intercept Ctrl+C (only with active selection) and Ctrl+V
         if (localClipboardMode && event.isControlDown && !event.isAltDown && !event.isMetaDown) {
             when (event.code) {
                 KeyCode.C -> {
+                    // Only intercept for copy when there's an active selection.
+                    // Otherwise fall through to send 0x03 (SIGINT) like GNOME Terminal.
                     if (selectionActive) {
                         val text = getSelectedText()
                         if (text.isNotEmpty()) {
@@ -502,9 +523,11 @@ class TerminalWidget : Region() {
                             content.putString(text)
                             Clipboard.getSystemClipboard().setContent(content)
                         }
+                        clearSelection()
+                        event.consume()
+                        return
                     }
-                    event.consume()
-                    return
+                    // No selection — fall through to send Ctrl+C (SIGINT) to remote
                 }
                 KeyCode.V -> {
                     val clipboard = Clipboard.getSystemClipboard()
@@ -608,6 +631,7 @@ class TerminalWidget : Region() {
         if (c.code in 1..26 || c.code == 0) return
 
         if (c.code >= 32) {
+            snapToLive()
             onInput?.invoke(ch)
             event.consume()
         }

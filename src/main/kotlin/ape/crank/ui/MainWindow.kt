@@ -194,8 +194,9 @@ class MainWindow(private val stateManager: StateManager) {
         }
         terminalWidget.onResize = label@{ cols, rows ->
             val sid = currentSessionId ?: return@label
+            // Resize the buffer (already done by handleLayoutResize on the attached buffer,
+            // but the worker needs the PTY signal)
             sshService.getWorker(sid)?.resize(cols, rows)
-            terminalBuffers[sid]?.resize(cols, rows)
         }
         terminalWidget.onScrollChanged = { offset, max ->
             Platform.runLater {
@@ -398,9 +399,10 @@ class MainWindow(private val stateManager: StateManager) {
         terminalBuffers[session.id] = buffer
         terminalParsers[session.id] = parser
 
-        // Create worker, set callbacks FIRST, then connect asynchronously
+        // Create worker, set callbacks FIRST, set PTY size, then connect asynchronously
         val worker = sshService.createSession(config, session.id)
         setupSshCallbacks(session, worker)
+        worker.resize(terminalWidget.termCols, terminalWidget.termRows)
         worker.connectAsync()
 
         sessionTreeView.refresh(stateManager.state.sessions, stateManager.state.folders)
@@ -565,6 +567,9 @@ class MainWindow(private val stateManager: StateManager) {
             // Create worker and set callbacks BEFORE any connection attempt
             val worker = sshService.createSession(config, session.id)
             setupSshCallbacks(session, worker)
+            // Pre-set PTY size so connect() uses actual widget dimensions (if available)
+            // rather than the 80x24 default
+            worker.resize(terminalWidget.termCols, terminalWidget.termRows)
 
             sessionsToConnect.add(Pair(session, config))
         }

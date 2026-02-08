@@ -130,6 +130,25 @@ class SshSessionWorker(
         return sb.toString()
     }
 
+    // ------------------------------------------------------------------ PTY size tracking
+
+    @Volatile private var ptyCols: Int = 80
+    @Volatile private var ptyRows: Int = 24
+
+    /**
+     * Set the desired PTY dimensions. Used on initial connect and reconnect.
+     * Also sends a window-change signal if a channel is already open.
+     */
+    fun resize(cols: Int, rows: Int) {
+        ptyCols = cols
+        ptyRows = rows
+        try {
+            channel?.sendWindowChange(cols, rows)
+        } catch (e: Exception) {
+            System.err.println("[SshSessionWorker:$sessionId] resize failed: ${e.message}")
+        }
+    }
+
     // ------------------------------------------------------------------ internal state
 
     private val state = AtomicReference(State.DISCONNECTED)
@@ -214,8 +233,8 @@ class SshSessionWorker(
             // -- Open shell channel
             val shell = newSession.createShellChannel()
             shell.setPtyType("xterm-256color")
-            shell.setPtyColumns(80)
-            shell.setPtyLines(24)
+            shell.setPtyColumns(ptyCols)
+            shell.setPtyLines(ptyRows)
 
             for ((key, value) in config.environmentVariables) {
                 shell.setEnv(key, value)
@@ -287,14 +306,6 @@ class SshSessionWorker(
         } catch (e: Exception) {
             System.err.println("[SshSessionWorker:$sessionId] sendData failed: ${e.message}")
             handleConnectionLost()
-        }
-    }
-
-    fun resize(cols: Int, rows: Int) {
-        try {
-            channel?.sendWindowChange(cols, rows)
-        } catch (e: Exception) {
-            System.err.println("[SshSessionWorker:$sessionId] resize failed: ${e.message}")
         }
     }
 

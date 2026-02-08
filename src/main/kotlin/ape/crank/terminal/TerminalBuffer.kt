@@ -39,8 +39,8 @@ class TerminalBuffer(var cols: Int = 80, var rows: Int = 24) {
     var buffer: Array<Array<Cell>> = mainBuffer
         private set
 
-    // Scrollback buffer (only for main screen)
-    val scrollback: MutableList<Array<Cell>> = mutableListOf()
+    // Scrollback buffer (only for main screen) — Kotlin ArrayDeque for O(1) add/remove + O(1) random access
+    val scrollback: ArrayDeque<Array<Cell>> = ArrayDeque(MAX_SCROLLBACK)
 
     // Cursor position
     var cursorRow: Int = 0
@@ -211,9 +211,9 @@ class TerminalBuffer(var cols: Int = 80, var rows: Int = 24) {
         for (i in 0 until n) {
             // Add top line to scrollback if on main screen
             if (!usingAltScreen) {
-                scrollback.add(buffer[scrollTop].copyOf())
+                scrollback.addLast(buffer[scrollTop].copyOf())
                 if (scrollback.size > MAX_SCROLLBACK) {
-                    scrollback.removeAt(0)
+                    scrollback.removeFirst()
                 }
             }
             // Shift lines up within scroll region
@@ -412,21 +412,76 @@ class TerminalBuffer(var cols: Int = 80, var rows: Int = 24) {
     fun resize(newCols: Int, newRows: Int) {
         if (newCols == cols && newRows == rows) return
 
-        val newMain = createGrid(newCols, newRows)
-        val newAlt = createGrid(newCols, newRows)
-
-        // Copy what fits from main buffer
-        val copyRowsMain = minOf(rows, newRows)
-        val copyCols = minOf(cols, newCols)
-        for (r in 0 until copyRowsMain) {
-            for (c in 0 until copyCols) {
-                newMain[r][c] = mainBuffer[r][c]
+        // --- Main buffer: preserve content relative to cursor ---
+        val newMain: Array<Array<Cell>>
+        if (newRows < rows) {
+            // Shrinking vertically: push excess lines above cursor into scrollback
+            // to avoid losing content the user can see
+            val rowsToKeep = newRows
+            // How many rows above cursor we can keep
+            val keepAboveCursor = minOf(cursorRow, rowsToKeep - 1)
+            // The first row to keep (everything above gets pushed to scrollback)
+            val firstKeptRow = cursorRow - keepAboveCursor
+            if (!usingAltScreen && firstKeptRow > 0) {
+                for (r in 0 until firstKeptRow) {
+                    scrollback.addLast(mainBuffer[r].copyOf())
+                    if (scrollback.size > MAX_SCROLLBACK) {
+                        scrollback.removeFirst()
+                    }
+                }
+            }
+            newMain = createGrid(newCols, newRows)
+            val copyCols = minOf(cols, newCols)
+            val rowsToCopy = minOf(rows - firstKeptRow, newRows)
+            for (r in 0 until rowsToCopy) {
+                val srcRow = mainBuffer[firstKeptRow + r]
+                for (c in 0 until copyCols) {
+                    newMain[r][c] = srcRow[c]
+                }
+            }
+            cursorRow = keepAboveCursor
+        } else if (newRows > rows) {
+            // Growing vertically: pull lines from scrollback to fill new rows at top
+            val extraRows = newRows - rows
+            val fromScrollback = if (!usingAltScreen) minOf(extraRows, scrollback.size) else 0
+            newMain = createGrid(newCols, newRows)
+            val copyCols = minOf(cols, newCols)
+            // Copy scrollback lines at top
+            for (r in 0 until fromScrollback) {
+                val scrollIdx = scrollback.size - fromScrollback + r
+                val srcRow = scrollback[scrollIdx]
+                for (c in 0 until minOf(srcRow.size, newCols)) {
+                    newMain[r][c] = srcRow[c]
+                }
+            }
+            // Remove those lines from scrollback
+            repeat(fromScrollback) { scrollback.removeLast() }
+            // Copy existing screen below the pulled-in scrollback lines
+            val offset = fromScrollback + (extraRows - fromScrollback)
+            for (r in 0 until rows) {
+                val srcRow = mainBuffer[r]
+                for (c in 0 until copyCols) {
+                    newMain[offset + r][c] = srcRow[c]
+                }
+            }
+            cursorRow = offset + cursorRow
+        } else {
+            // Only column change
+            newMain = createGrid(newCols, newRows)
+            val copyCols = minOf(cols, newCols)
+            for (r in 0 until rows) {
+                for (c in 0 until copyCols) {
+                    newMain[r][c] = mainBuffer[r][c]
+                }
             }
         }
 
-        // Copy what fits from alt buffer
+        // --- Alt buffer: simple copy-truncate (alt screen programs redraw on SIGWINCH) ---
+        val newAlt = createGrid(newCols, newRows)
         if (usingAltScreen) {
-            for (r in 0 until copyRowsMain) {
+            val copyRowsAlt = minOf(rows, newRows)
+            val copyCols = minOf(cols, newCols)
+            for (r in 0 until copyRowsAlt) {
                 for (c in 0 until copyCols) {
                     newAlt[r][c] = altBuffer[r][c]
                 }
