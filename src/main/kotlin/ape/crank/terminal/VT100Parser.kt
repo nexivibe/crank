@@ -56,6 +56,20 @@ class VT100Parser(private val buffer: TerminalBuffer) {
         Color.web("#FFFFFF")  // Bright White
     )
 
+    /**
+     * Reset the parser state machine to ground state, clearing any
+     * accumulated CSI/OSC parameters. Call on SSH reconnection to
+     * prevent stale partial escape sequences from corrupting output.
+     */
+    fun reset() {
+        state = State.GROUND
+        params.clear()
+        currentParam.clear()
+        privateMarker = '\u0000'
+        intermediateChars.clear()
+        oscString.clear()
+    }
+
     fun feed(data: String) {
         for (ch in data) {
             processByte(ch)

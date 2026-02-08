@@ -44,10 +44,27 @@ class MainWindow(private val stateManager: StateManager) {
     private val sessionTreeView = SessionTreeView()
     private val terminalWidget = TerminalWidget()
     private val terminalStatusBar = TerminalStatusBar()
+    private val clipboardToggle = ToggleButton("Clipboard", CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0)).apply {
+        style = "-fx-font-size: 11;"
+        isSelected = true
+        selectedProperty().addListener { _, _, newVal ->
+            terminalWidget.localClipboardMode = newVal
+        }
+    }
     private val placeholderLabel = Label("Select or create a terminal session").apply {
         style = "-fx-text-fill: #808080; -fx-font-size: 16;"
     }
     private val terminalPane = StackPane(placeholderLabel)
+    private val terminalScrollBar = ScrollBar().apply {
+        orientation = Orientation.VERTICAL
+        prefWidth = 14.0
+        min = 0.0
+        max = 0.0
+        value = 0.0
+        visibleAmount = 1.0
+        unitIncrement = 1.0
+        blockIncrement = 24.0
+    }
     private val missionTextField = TextField().apply {
         promptText = "Mission notes for this session..."
         style = "-fx-background-color: #2A2A2A; -fx-text-fill: #D0D0D0; -fx-prompt-text-fill: #606060; -fx-border-color: #3A3A3A; -fx-border-width: 0 0 1 0;"
@@ -142,9 +159,12 @@ class MainWindow(private val stateManager: StateManager) {
 
     private fun initSessionTree() {
         sessionTreeView.onSessionSelected = { session -> selectSession(session.id) }
-        sessionTreeView.onNewTerminalRequested = { createNewTerminal() }
+        sessionTreeView.onNewTerminalRequested = { folderId -> createNewTerminal(folderId) }
         sessionTreeView.onNewFolderRequested = { createNewFolder() }
         sessionTreeView.onSessionRemoved = { session -> removeSession(session) }
+        sessionTreeView.onSessionRenamed = { _ ->
+            stateManager.save()
+        }
         sessionTreeView.onFolderRenamed = { _ ->
             stateManager.save()
         }
@@ -165,6 +185,8 @@ class MainWindow(private val stateManager: StateManager) {
 
     // ------------------------------------------------------------------ terminal widget
 
+    private var updatingScrollBar = false
+
     private fun initTerminalWidget() {
         terminalWidget.onInput = label@{ data ->
             val sid = currentSessionId ?: return@label
@@ -175,6 +197,23 @@ class MainWindow(private val stateManager: StateManager) {
             sshService.getWorker(sid)?.resize(cols, rows)
             terminalBuffers[sid]?.resize(cols, rows)
         }
+        terminalWidget.onScrollChanged = { offset, max ->
+            Platform.runLater {
+                updatingScrollBar = true
+                terminalScrollBar.max = max.toDouble()
+                // Invert: scrollbar 0 = top of scrollback, max = live bottom
+                terminalScrollBar.value = (max - offset).toDouble()
+                terminalScrollBar.visibleAmount = terminalWidget.termRows.toDouble()
+                updatingScrollBar = false
+            }
+        }
+        terminalScrollBar.valueProperty().addListener { _, _, newVal ->
+            if (!updatingScrollBar) {
+                val max = terminalScrollBar.max.toInt()
+                val offset = max - newVal.toInt()
+                terminalWidget.scrollTo(offset)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ right pane (terminal + status bar)
@@ -183,13 +222,22 @@ class MainWindow(private val stateManager: StateManager) {
         terminalPane.children.add(terminalWidget)
         terminalWidget.isVisible = false
 
+        val terminalWithScrollbar = HBox().apply {
+            children.addAll(terminalPane, terminalScrollBar)
+            HBox.setHgrow(terminalPane, Priority.ALWAYS)
+        }
+
         val terminalWithMission = VBox().apply {
-            children.addAll(missionTextField, terminalPane)
-            VBox.setVgrow(terminalPane, Priority.ALWAYS)
+            children.addAll(missionTextField, terminalWithScrollbar)
+            VBox.setVgrow(terminalWithScrollbar, Priority.ALWAYS)
         }
 
         rightPane.center = terminalWithMission
-        rightPane.bottom = terminalStatusBar
+        val bottomBar = HBox(8.0, clipboardToggle, terminalStatusBar).apply {
+            alignment = Pos.CENTER_LEFT
+            HBox.setHgrow(terminalStatusBar, Priority.ALWAYS)
+        }
+        rightPane.bottom = bottomBar
     }
 
     // ------------------------------------------------------------------ split pane
@@ -322,7 +370,7 @@ class MainWindow(private val stateManager: StateManager) {
         updateGlobalStatusBar()
     }
 
-    fun createNewTerminal() {
+    fun createNewTerminal(folderId: String? = null) {
         if (stateManager.state.connections.isEmpty()) {
             Alert(Alert.AlertType.INFORMATION).apply {
                 title = "No Connections"
@@ -337,6 +385,7 @@ class MainWindow(private val stateManager: StateManager) {
         val session: TerminalSession? = if (result.isPresent) result.get() else null
         if (session == null) return
 
+        session.folderId = folderId
         session.order = stateManager.state.sessions.size
         stateManager.state.sessions.add(session)
         stateManager.save()
@@ -391,8 +440,9 @@ class MainWindow(private val stateManager: StateManager) {
         // Resize buffer if widget dimensions differ (e.g. startup used 80x24)
         if (buffer.cols != terminalWidget.termCols || buffer.rows != terminalWidget.termRows) {
             buffer.resize(terminalWidget.termCols, terminalWidget.termRows)
-            sshService.getWorker(sessionId)?.resize(terminalWidget.termCols, terminalWidget.termRows)
         }
+        // Always notify the server of current PTY dimensions on session switch
+        sshService.getWorker(sessionId)?.resize(terminalWidget.termCols, terminalWidget.termRows)
         val parser = terminalParsers.getOrPut(sessionId) { VT100Parser(buffer) }
 
         terminalWidget.attachSession(buffer, parser)
@@ -405,6 +455,14 @@ class MainWindow(private val stateManager: StateManager) {
         missionTextField.isVisible = true
         missionTextField.isManaged = true
         missionTextField.textProperty().addListener(missionChangeListener)
+
+        // Reset scrollbar for this session (start at live/bottom view)
+        updatingScrollBar = true
+        terminalScrollBar.max = buffer.scrollback.size.toDouble()
+        terminalScrollBar.value = buffer.scrollback.size.toDouble()
+        terminalScrollBar.visibleAmount = terminalWidget.termRows.toDouble()
+        terminalScrollBar.blockIncrement = terminalWidget.termRows.toDouble()
+        updatingScrollBar = false
 
         sessionTreeView.selectSession(sessionId)
         updateTerminalStatusBar()
@@ -430,6 +488,11 @@ class MainWindow(private val stateManager: StateManager) {
 
         worker.onStateChanged = { newState ->
             sessionStateCache[session.id] = newState
+            // Reset parser state machine on reconnection to prevent garbled
+            // output from stale partial escape sequences
+            if (newState == SshSessionWorker.State.CONNECTED) {
+                terminalParsers[session.id]?.reset()
+            }
             val thresholdMs = stateManager.state.inactivityThresholdSeconds * 1000L
             val inactive = isSessionInactive(session.id, thresholdMs)
             Platform.runLater {
@@ -438,6 +501,12 @@ class MainWindow(private val stateManager: StateManager) {
                 if (currentSessionId == session.id) {
                     updateTerminalStatusBar()
                 }
+            }
+        }
+
+        terminalParsers[session.id]?.onTitleChanged = { title ->
+            Platform.runLater {
+                sessionTreeView.updateSessionTitle(session.id, title)
             }
         }
 

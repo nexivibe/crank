@@ -140,6 +140,7 @@ class SshSessionWorker(
     private val reconnectAttempt = AtomicInteger(0)
     private val reconnectEnabled = AtomicBoolean(false)
     private val shutdownRequested = AtomicBoolean(false)
+    private val connectionGeneration = AtomicInteger(0)
 
     // ------------------------------------------------------------------ public API
 
@@ -180,7 +181,8 @@ class SshSessionWorker(
                 "from ${config.privateKeyPath} (${keyPairs.map { it.private.algorithm }})"
             )
 
-            val timeoutSec = config.connectionTimeoutSeconds.toLong()
+            // 0 means no timeout (effectively infinite)
+            val timeoutSec = if (config.connectionTimeoutSeconds == 0) Long.MAX_VALUE / 1000 else config.connectionTimeoutSeconds.toLong()
 
             // -- TCP connect + host key verification (serialized across workers)
             val newSession = synchronized(connectLock) {
@@ -229,8 +231,9 @@ class SshSessionWorker(
             nextReconnectTimeMs = 0
             lastErrorMessage = null
 
+            val generation = connectionGeneration.incrementAndGet()
             transition(State.CONNECTED)
-            startReaderThread(shell)
+            startReaderThread(shell, generation)
 
             // Send initial command if configured, with template variable substitution
             val cmd = config.initialCommand
@@ -409,7 +412,7 @@ class SshSessionWorker(
         }
     }
 
-    private fun startReaderThread(shell: ChannelShell) {
+    private fun startReaderThread(shell: ChannelShell, generation: Int) {
         val thread = Thread({
             val buf = ByteArray(8192)
             try {
@@ -418,6 +421,8 @@ class SshSessionWorker(
                     val n = input.read(buf)
                     if (n == -1) break
                     if (n > 0) {
+                        // Drop data from stale reader after reconnection
+                        if (connectionGeneration.get() != generation) break
                         bytesReceived.addAndGet(n.toLong())
                         synchronized(recentChunks) {
                             recentChunks.add(Pair(System.currentTimeMillis(), n))

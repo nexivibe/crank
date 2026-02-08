@@ -30,10 +30,10 @@ class ConnectionDialog(
     private val portSpinner = Spinner<Int>(1, 65535, 22)
     private val usernameField = TextField()
     private val privateKeyPathField = TextField()
-    private val browseButton = Button("Browse...")
+    private val browseButton = Button("Browse", CrankIcons.icon(CrankIcons.FOLDER_OPEN, size = 14.0))
     private val knownHostsPolicyCombo = ComboBox<KnownHostsPolicy>()
-    private val keepAliveSpinner = Spinner<Int>(0, 3600, 30)
-    private val connectionTimeoutSpinner = Spinner<Int>(1, 300, 30)
+    private val keepAliveSpinner = Spinner<Int>(0, 3600, 0)
+    private val connectionTimeoutSpinner = Spinner<Int>(0, 300, 0)
     private val compressionCheckBox = CheckBox("Enable compression")
     private val initialCommandField = TextField()
     private val labelField = TextField()
@@ -149,8 +149,20 @@ class ConnectionDialog(
         formPane.add(keepAliveSpinner, 1, row)
         row++
 
+        val keepAliveHelpLabel = Label("0 = disabled (no keep-alive)")
+        keepAliveHelpLabel.style = "-fx-font-size: 11px; -fx-text-fill: #888888;"
+        formPane.add(Label(), 0, row)
+        formPane.add(keepAliveHelpLabel, 1, row)
+        row++
+
         formPane.add(Label("Connection Timeout (s):"), 0, row)
         formPane.add(connectionTimeoutSpinner, 1, row)
+        row++
+
+        val timeoutHelpLabel = Label("0 = disabled (no timeout)")
+        timeoutHelpLabel.style = "-fx-font-size: 11px; -fx-text-fill: #888888;"
+        formPane.add(Label(), 0, row)
+        formPane.add(timeoutHelpLabel, 1, row)
         row++
 
         formPane.add(Label("Compression:"), 0, row)
@@ -213,10 +225,10 @@ class ConnectionDialog(
 
     private fun setupLayout() {
         // Bottom buttons
-        val addButton = Button("Add New")
+        val addButton = Button("Add", CrankIcons.icon(CrankIcons.PLUS_CIRCLE, size = 14.0))
         addButton.setOnAction { addNewConnection() }
 
-        val removeButton = Button("Remove")
+        val removeButton = Button("Remove", CrankIcons.icon(CrankIcons.TRASH, size = 14.0))
         removeButton.setOnAction { removeSelectedConnection() }
 
         val buttonBar = HBox(10.0, addButton, removeButton)
@@ -322,13 +334,13 @@ class ConnectionDialog(
 
         keepAliveSpinner.valueProperty().addListener { _, _, newValue ->
             if (!updatingForm) {
-                currentConnection?.keepAliveIntervalSeconds = newValue ?: 30
+                currentConnection?.keepAliveIntervalSeconds = newValue ?: 0
             }
         }
 
         connectionTimeoutSpinner.valueProperty().addListener { _, _, newValue ->
             if (!updatingForm) {
-                currentConnection?.connectionTimeoutSeconds = newValue ?: 30
+                currentConnection?.connectionTimeoutSeconds = newValue ?: 0
             }
         }
 
@@ -396,8 +408,8 @@ class ConnectionDialog(
         usernameField.text = ""
         privateKeyPathField.text = ""
         knownHostsPolicyCombo.value = KnownHostsPolicy.ACCEPT_NEW
-        keepAliveSpinner.valueFactory.value = 30
-        connectionTimeoutSpinner.valueFactory.value = 30
+        keepAliveSpinner.valueFactory.value = 0
+        connectionTimeoutSpinner.valueFactory.value = 0
         compressionCheckBox.isSelected = false
         initialCommandField.text = ""
         labelField.text = ""

@@ -37,11 +37,12 @@ class SessionTreeView : VBox() {
 
     var onSessionSelected: ((TerminalSession) -> Unit)? = null
     var onSessionMoved: ((sessionId: String, newFolderId: String?) -> Unit)? = null
-    var onNewTerminalRequested: (() -> Unit)? = null
+    var onNewTerminalRequested: ((folderId: String?) -> Unit)? = null
     var onNewFolderRequested: (() -> Unit)? = null
     var onSessionRemoved: ((TerminalSession) -> Unit)? = null
     var onFolderRenamed: ((SessionFolder) -> Unit)? = null
     var onFolderRemoved: ((SessionFolder) -> Unit)? = null
+    var onSessionRenamed: ((TerminalSession) -> Unit)? = null
 
     // ------------------------------------------------------------------ UI components
 
@@ -57,6 +58,7 @@ class SessionTreeView : VBox() {
     )
 
     private val sessionStatuses = ConcurrentHashMap<String, SessionStatus>()
+    private val sessionTitles = ConcurrentHashMap<String, String>()
     private val sessionBandwidth = ConcurrentHashMap<String, Double>()
     private var maxBandwidth: Double = 0.0
 
@@ -75,17 +77,17 @@ class SessionTreeView : VBox() {
 
     private val bandwidthListView = ListView<BandwidthEntry>()
     private val bandwidthItems = FXCollections.observableArrayList<BandwidthEntry>()
-    private val focusModeToggle = ToggleButton("Focus Mode")
+    private val focusModeToggle = ToggleButton("Focus", CrankIcons.icon(CrankIcons.EYE))
     private var focusModeActive = false
 
     // ------------------------------------------------------------------ init
 
     init {
         // ---------- toolbar ----------
-        val newTerminalBtn = Button("New Terminal").apply {
-            setOnAction { onNewTerminalRequested?.invoke() }
+        val newTerminalBtn = Button("Terminal", CrankIcons.icon(CrankIcons.TERMINAL)).apply {
+            setOnAction { onNewTerminalRequested?.invoke(getSelectedFolderId()) }
         }
-        val newFolderBtn = Button("New Folder").apply {
+        val newFolderBtn = Button("Folder", CrankIcons.icon(CrankIcons.FOLDER_PLUS)).apply {
             setOnAction { onNewFolderRequested?.invoke() }
         }
         focusModeToggle.setOnAction { toggleFocusMode() }
@@ -229,6 +231,35 @@ class SessionTreeView : VBox() {
                 treeView.scrollTo(index)
             }
         }
+    }
+
+    /**
+     * Update the terminal title for a session and refresh its tree cell.
+     */
+    fun updateSessionTitle(sessionId: String, title: String) {
+        sessionTitles[sessionId] = title
+        Platform.runLater {
+            val item = sessionTreeItems[sessionId]
+            if (item != null) {
+                val current = item.value
+                item.value = null
+                item.value = current
+            }
+        }
+    }
+
+    /**
+     * Returns the folder ID of the currently selected tree item:
+     * - If a folder is selected, returns that folder's ID.
+     * - If a session inside a folder is selected, returns the parent folder's ID.
+     * - Otherwise returns null (root-level or nothing selected).
+     */
+    private fun getSelectedFolderId(): String? {
+        val selected = treeView.selectionModel.selectedItem ?: return null
+        val value = selected.value
+        if (value is SessionFolder) return value.id
+        if (value is TerminalSession && value.folderId != null) return value.folderId
+        return null
     }
 
     // ------------------------------------------------------------------ focus mode controls
@@ -449,10 +480,11 @@ class SessionTreeView : VBox() {
 
         return HBox(4.0, folderIcon, statusCircle, nameLabel, countLabel).apply {
             alignment = Pos.CENTER_LEFT
+            padding = Insets(4.0, 6.0, 4.0, 2.0)
         }
     }
 
-    private fun buildSessionGraphic(session: TerminalSession): HBox {
+    private fun buildSessionGraphic(session: TerminalSession): VBox {
         val status = sessionStatuses[session.id] ?: SessionStatus()
         val indicatorColor = resolveIndicatorColor(status)
 
@@ -463,13 +495,31 @@ class SessionTreeView : VBox() {
         val idLabel = Label(idPrefix)
         idLabel.style = "-fx-text-fill: #3A3A3A; -fx-font-size: 10;"
 
-        // Bandwidth meter: 5 boxes, filled based on relative bandwidth
+        // Line 1: indicator, name, id
+        val line1 = HBox(6.0, circle, nameLabel, idLabel).apply {
+            alignment = Pos.CENTER_LEFT
+        }
+
+        // Line 2: bandwidth meter + window title
         val meterLabel = Label(buildBandwidthMeter(session.id))
         meterLabel.style = "-fx-font-size: 10; -fx-text-fill: #2A4A6A;"
 
-        return HBox(6.0, circle, nameLabel, meterLabel, idLabel).apply {
+        val titleText = sessionTitles[session.id]
+        val line2Children = mutableListOf<javafx.scene.Node>(meterLabel)
+        if (!titleText.isNullOrBlank()) {
+            line2Children.add(Label(titleText).apply {
+                style = "-fx-text-fill: #808080; -fx-font-size: 11;"
+                maxWidth = 200.0
+            })
+        }
+        val line2 = HBox(6.0).apply {
+            this.children.addAll(line2Children)
             alignment = Pos.CENTER_LEFT
-            padding = Insets(1.0, 0.0, 1.0, 0.0)
+            padding = Insets(0.0, 0.0, 0.0, 16.0)
+        }
+
+        return VBox(1.0, line1, line2).apply {
+            padding = Insets(2.0, 6.0, 2.0, 4.0)
         }
     }
 
@@ -498,6 +548,27 @@ class SessionTreeView : VBox() {
     // ------------------------------------------------------------------ context menus
 
     private fun buildSessionContextMenu(session: TerminalSession): ContextMenu {
+        val renameItem = MenuItem("Rename Session")
+        renameItem.setOnAction {
+            val dialog = TextInputDialog(session.name.ifEmpty { "Session" })
+            dialog.title = "Rename Session"
+            dialog.headerText = "Enter a new name for the session:"
+            dialog.contentText = "Name:"
+            val result = dialog.showAndWait()
+            if (result.isPresent && result.get().isNotBlank()) {
+                session.name = result.get().trim()
+                onSessionRenamed?.invoke(session)
+                val item = sessionTreeItems[session.id]
+                if (item != null) {
+                    val current = item.value
+                    item.value = null
+                    item.value = current
+                }
+            }
+        }
+
+        val separator = SeparatorMenuItem()
+
         val removeItem = MenuItem("Remove Session")
         removeItem.setOnAction {
             val alert = Alert(Alert.AlertType.CONFIRMATION)
@@ -509,7 +580,7 @@ class SessionTreeView : VBox() {
                 onSessionRemoved?.invoke(session)
             }
         }
-        return ContextMenu(removeItem)
+        return ContextMenu(renameItem, separator, removeItem)
     }
 
     private fun buildFolderContextMenu(folder: SessionFolder): ContextMenu {

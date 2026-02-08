@@ -3,6 +3,8 @@ package ape.crank.terminal
 import javafx.application.Platform
 import javafx.scene.canvas.Canvas
 import javafx.scene.canvas.GraphicsContext
+import javafx.scene.input.Clipboard
+import javafx.scene.input.ClipboardContent
 import javafx.scene.input.KeyCode
 import javafx.scene.input.KeyEvent
 import javafx.scene.layout.Region
@@ -49,6 +51,21 @@ class TerminalWidget : Region() {
     private val dataRateWindow: MutableList<Pair<Long, Int>> = mutableListOf()
     private val dataRateWindowMs: Long = 10_000L
 
+    // Scrollback viewing offset: 0 = live (showing bottom/current screen), N = N lines into scrollback
+    var scrollOffset: Int = 0
+        private set
+    var onScrollChanged: ((offset: Int, max: Int) -> Unit)? = null
+
+    // Selection state
+    private var selectionActive: Boolean = false
+    private var selectionStartRow: Int = 0
+    private var selectionStartCol: Int = 0
+    private var selectionEndRow: Int = 0
+    private var selectionEndCol: Int = 0
+
+    // Clipboard mode: when true, Ctrl+C copies selection and Ctrl+V pastes from system clipboard
+    var localClipboardMode: Boolean = true
+
     // Render coalescing
     private var lastRenderedVersion: Long = -1L
     private var renderPending: Boolean = false
@@ -80,8 +97,50 @@ class TerminalWidget : Region() {
         setOnKeyPressed { event -> handleKeyPressed(event) }
         setOnKeyTyped { event -> handleKeyTyped(event) }
 
-        // Click to focus
-        setOnMouseClicked { requestFocus() }
+        // Mouse selection handlers
+        setOnMousePressed { event ->
+            requestFocus()
+            val col = (event.x / cellWidth).toInt().coerceIn(0, termCols - 1)
+            val row = (event.y / cellHeight).toInt().coerceIn(0, termRows - 1)
+            selectionStartRow = row
+            selectionStartCol = col
+            selectionEndRow = row
+            selectionEndCol = col
+            selectionActive = false
+            lastRenderedVersion = -1L
+            requestRender()
+        }
+
+        setOnMouseDragged { event ->
+            val col = (event.x / cellWidth).toInt().coerceIn(0, termCols - 1)
+            val row = (event.y / cellHeight).toInt().coerceIn(0, termRows - 1)
+            selectionEndRow = row
+            selectionEndCol = col
+            selectionActive = true
+            lastRenderedVersion = -1L
+            requestRender()
+        }
+
+        setOnMouseReleased { event ->
+            if (selectionActive) {
+                val col = (event.x / cellWidth).toInt().coerceIn(0, termCols - 1)
+                val row = (event.y / cellHeight).toInt().coerceIn(0, termRows - 1)
+                selectionEndRow = row
+                selectionEndCol = col
+            }
+        }
+
+        // Mouse wheel scroll for scrollback history
+        setOnScroll { event ->
+            val buf = buffer ?: return@setOnScroll
+            val delta = if (event.deltaY > 0) 3 else -3
+            val maxOffset = buf.scrollback.size
+            scrollOffset = (scrollOffset + delta).coerceIn(0, maxOffset)
+            lastRenderedVersion = -1L // force re-render
+            requestRender()
+            onScrollChanged?.invoke(scrollOffset, maxOffset)
+            event.consume()
+        }
 
         // Style
         style = "-fx-background-color: black;"
@@ -114,6 +173,7 @@ class TerminalWidget : Region() {
         this.buffer = buffer
         this.parser = parser
         lastRenderedVersion = -1L
+        scrollOffset = 0
         requestRender()
     }
 
@@ -121,6 +181,7 @@ class TerminalWidget : Region() {
         this.buffer = null
         this.parser = null
         lastRenderedVersion = -1L
+        scrollOffset = 0
         // Clear the canvas
         val gc = canvas.graphicsContext2D
         gc.fill = Color.BLACK
@@ -140,7 +201,18 @@ class TerminalWidget : Region() {
             dataRateWindow.removeAll { it.first < cutoff }
         }
 
+        val scrollbackBefore = buffer?.scrollback?.size ?: 0
         parser?.feed(data)
+        val scrollbackAfter = buffer?.scrollback?.size ?: 0
+        val scrollbackGrowth = scrollbackAfter - scrollbackBefore
+
+        if (scrollOffset > 0) {
+            // User is scrolled into history — keep viewport stable by
+            // compensating for new scrollback lines added at the bottom
+            scrollOffset = (scrollOffset + scrollbackGrowth).coerceAtMost(scrollbackAfter)
+        }
+        // Always notify scrollbar so its max and thumb stay current
+        onScrollChanged?.invoke(scrollOffset, scrollbackAfter)
         requestRender()
     }
 
@@ -170,6 +242,87 @@ class TerminalWidget : Region() {
         return (System.currentTimeMillis() - lastDataTimestamp) > thresholdMs
     }
 
+    fun scrollTo(offset: Int) {
+        val buf = buffer ?: return
+        scrollOffset = offset.coerceIn(0, buf.scrollback.size)
+        lastRenderedVersion = -1L
+        requestRender()
+    }
+
+    fun getMaxScrollOffset(): Int {
+        return buffer?.scrollback?.size ?: 0
+    }
+
+    fun clearSelection() {
+        selectionActive = false
+        lastRenderedVersion = -1L
+        requestRender()
+    }
+
+    /**
+     * Returns (startRow, startCol, endRow, endCol) normalized so start <= end.
+     */
+    private fun normalizeSelection(): Array<Int> {
+        val sr = selectionStartRow; val sc = selectionStartCol
+        val er = selectionEndRow; val ec = selectionEndCol
+        return if (sr < er || (sr == er && sc <= ec)) {
+            arrayOf(sr, sc, er, ec)
+        } else {
+            arrayOf(er, ec, sr, sc)
+        }
+    }
+
+    private fun isCellSelected(row: Int, col: Int): Boolean {
+        if (!selectionActive) return false
+        val (sr, sc, er, ec) = normalizeSelection()
+        if (row < sr || row > er) return false
+        if (row == sr && row == er) return col in sc..ec
+        if (row == sr) return col >= sc
+        if (row == er) return col <= ec
+        return true
+    }
+
+    /**
+     * Extract selected text from the current view (screen buffer or scrollback).
+     */
+    fun getSelectedText(): String {
+        if (!selectionActive) return ""
+        val buf = buffer ?: return ""
+        val (sr, sc, er, ec) = normalizeSelection()
+        val sb = StringBuilder()
+
+        for (row in sr..er) {
+            val startCol = if (row == sr) sc else 0
+            val endCol = if (row == er) ec else termCols - 1
+            val lineBuilder = StringBuilder()
+            for (col in startCol..endCol) {
+                val cell = getCellForViewRow(buf, row, col)
+                lineBuilder.append(cell.char)
+            }
+            // Trim trailing spaces per line
+            sb.append(lineBuilder.toString().trimEnd())
+            if (row < er) sb.append('\n')
+        }
+        return sb.toString()
+    }
+
+    private fun getCellForViewRow(buf: TerminalBuffer, viewRow: Int, col: Int): Cell {
+        if (scrollOffset > 0) {
+            val scrollbackSize = buf.scrollback.size
+            val scrollbackStart = (scrollbackSize - scrollOffset).coerceAtLeast(0)
+            val virtualIndex = scrollbackStart + viewRow
+            return if (virtualIndex < scrollbackSize) {
+                val scrollbackRow = buf.scrollback[virtualIndex]
+                if (col < scrollbackRow.size) scrollbackRow[col] else Cell()
+            } else {
+                val screenRow = virtualIndex - scrollbackSize
+                if (screenRow in 0 until buf.rows) buf.getCell(screenRow, col) else Cell()
+            }
+        } else {
+            return buf.getCell(viewRow, col)
+        }
+    }
+
     private fun requestRender() {
         if (renderPending) return
         renderPending = true
@@ -181,7 +334,7 @@ class TerminalWidget : Region() {
 
     private fun render() {
         val buf = buffer ?: return
-        if (buf.version == lastRenderedVersion) return
+        if (buf.version == lastRenderedVersion && scrollOffset == 0) return
         lastRenderedVersion = buf.version
 
         val gc = canvas.graphicsContext2D
@@ -192,17 +345,61 @@ class TerminalWidget : Region() {
         gc.fill = Color.BLACK
         gc.fillRect(0.0, 0.0, w, h)
 
-        // Draw each cell
-        for (row in 0 until buf.rows) {
-            for (col in 0 until buf.cols) {
-                val x = col * cellWidth
+        if (scrollOffset > 0) {
+            // Viewing scrollback: compose virtual rows from scrollback + screen buffer
+            val scrollbackSize = buf.scrollback.size
+            // scrollOffset lines from the bottom of scrollback
+            // We show rows from: scrollback[scrollbackSize - scrollOffset] onward, then screen buffer
+            val scrollbackStart = (scrollbackSize - scrollOffset).coerceAtLeast(0)
+            for (row in 0 until buf.rows) {
+                val virtualIndex = scrollbackStart + row
+                for (col in 0 until buf.cols) {
+                    val x = col * cellWidth
+                    val y = row * cellHeight
+                    if (x >= w || y >= h) continue
+
+                    val cell: Cell
+                    if (virtualIndex < scrollbackSize) {
+                        // From scrollback
+                        val scrollbackRow = buf.scrollback[virtualIndex]
+                        cell = if (col < scrollbackRow.size) scrollbackRow[col] else Cell()
+                    } else {
+                        // From screen buffer
+                        val screenRow = virtualIndex - scrollbackSize
+                        cell = if (screenRow in 0 until buf.rows) buf.getCell(screenRow, col) else Cell()
+                    }
+                    // No cursor when viewing scrollback
+                    drawCell(gc, cell, x, y, false)
+                }
+            }
+        } else {
+            // Normal live view
+            for (row in 0 until buf.rows) {
+                for (col in 0 until buf.cols) {
+                    val x = col * cellWidth
+                    val y = row * cellHeight
+                    if (x >= w || y >= h) continue
+
+                    val cell = buf.getCell(row, col)
+                    val isCursor = buf.cursorVisible && row == buf.cursorRow && col == buf.cursorCol
+
+                    drawCell(gc, cell, x, y, isCursor)
+                }
+            }
+        }
+
+        // Draw selection overlay
+        if (selectionActive) {
+            gc.fill = Color.color(0.3, 0.5, 0.8, 0.35)
+            val (sr, sc, er, ec) = normalizeSelection()
+            for (row in sr..er) {
+                if (row < 0 || row >= buf.rows) continue
+                val startCol = if (row == sr) sc else 0
+                val endCol = if (row == er) ec else buf.cols - 1
+                val x = startCol * cellWidth
                 val y = row * cellHeight
-                if (x >= w || y >= h) continue
-
-                val cell = buf.getCell(row, col)
-                val isCursor = buf.cursorVisible && row == buf.cursorRow && col == buf.cursorCol
-
-                drawCell(gc, cell, x, y, isCursor)
+                val selWidth = (endCol - startCol + 1) * cellWidth
+                gc.fillRect(x, y, selWidth, cellHeight)
             }
         }
 
@@ -293,6 +490,38 @@ class TerminalWidget : Region() {
 
     private fun handleKeyPressed(event: KeyEvent) {
         val buf = buffer ?: return
+
+        // Clipboard mode: intercept Ctrl+C/V before normal Ctrl+key handling
+        if (localClipboardMode && event.isControlDown && !event.isAltDown && !event.isMetaDown) {
+            when (event.code) {
+                KeyCode.C -> {
+                    if (selectionActive) {
+                        val text = getSelectedText()
+                        if (text.isNotEmpty()) {
+                            val content = ClipboardContent()
+                            content.putString(text)
+                            Clipboard.getSystemClipboard().setContent(content)
+                        }
+                    }
+                    event.consume()
+                    return
+                }
+                KeyCode.V -> {
+                    val clipboard = Clipboard.getSystemClipboard()
+                    val text = clipboard.string
+                    if (!text.isNullOrEmpty()) {
+                        if (buf.bracketedPasteMode) {
+                            onInput?.invoke("\u001B[200~$text\u001B[201~")
+                        } else {
+                            onInput?.invoke(text)
+                        }
+                    }
+                    event.consume()
+                    return
+                }
+                else -> {} // fall through to normal handling
+            }
+        }
 
         // Handle Ctrl+key combinations (Ctrl+A=0x01 .. Ctrl+Z=0x1A, etc.)
         if (event.isControlDown && !event.isAltDown && !event.isMetaDown) {
