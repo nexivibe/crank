@@ -1,5 +1,6 @@
 package ape.crank.ui
 
+import ape.crank.config.ConnectionLogger
 import ape.crank.config.StateManager
 import ape.crank.model.ConnectionConfig
 import ape.crank.model.SessionFolder
@@ -494,6 +495,9 @@ class MainWindow(private val stateManager: StateManager) {
             // output from stale partial escape sequences
             if (newState == SshSessionWorker.State.CONNECTED) {
                 terminalParsers[session.id]?.reset()
+                ConnectionLogger.log("active", session.name, session.id)
+            } else if (newState == SshSessionWorker.State.DISCONNECTED) {
+                ConnectionLogger.log("inactive", session.name, session.id)
             }
             val thresholdMs = stateManager.state.inactivityThresholdSeconds * 1000L
             val inactive = isSessionInactive(session.id, thresholdMs)

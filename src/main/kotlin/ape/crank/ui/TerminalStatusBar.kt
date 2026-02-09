@@ -94,6 +94,15 @@ class TerminalStatusBar : HBox(8.0) {
         hostLabel.text = host
         children.addAll(stateCircle, stateLabel, sep(), hostLabel)
 
+        // -- uptime (when connected)
+        if (st == SshSessionWorker.State.CONNECTED) {
+            val since = worker.connectedSince
+            if (since > 0) {
+                children.add(sep())
+                children.add(label("#A0A0A0", "Uptime: ${formatUptime(System.currentTimeMillis() - since)}"))
+            }
+        }
+
         // -- reconnect countdown
         if (st == SshSessionWorker.State.RECONNECTING) {
             val nextMs = worker.nextReconnectTimeMs
@@ -233,6 +242,20 @@ class TerminalStatusBar : HBox(8.0) {
             bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
             bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
             else -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+        }
+
+        fun formatUptime(ms: Long): String {
+            val totalSeconds = ms / 1000
+            val days = totalSeconds / 86400
+            val hours = (totalSeconds % 86400) / 3600
+            val minutes = (totalSeconds % 3600) / 60
+            val seconds = totalSeconds % 60
+            return buildString {
+                if (days > 0) append("${days}d ")
+                if (days > 0 || hours > 0) append("${hours}h ")
+                if (days > 0 || hours > 0 || minutes > 0) append("${minutes}m ")
+                append("${seconds}s")
+            }
         }
     }
 }

@@ -64,6 +64,8 @@ class SshSessionWorker(
     @Volatile var nextReconnectTimeMs: Long = 0L
         private set
     val reconnectAttemptNumber: Int get() = reconnectAttempt.get()
+    @Volatile var connectedSince: Long = 0L
+        private set
     val bytesSent = AtomicLong(0)
     val bytesReceived = AtomicLong(0)
 
@@ -251,6 +253,7 @@ class SshSessionWorker(
             lastErrorMessage = null
 
             val generation = connectionGeneration.incrementAndGet()
+            connectedSince = System.currentTimeMillis()
             transition(State.CONNECTED)
             startReaderThread(shell, generation)
 
@@ -321,6 +324,7 @@ class SshSessionWorker(
         } catch (e: Exception) {
             System.err.println("[SshSessionWorker:$sessionId] disconnect error: ${e.message}")
         } finally {
+            connectedSince = 0L
             transition(State.DISCONNECTED)
         }
     }
@@ -459,6 +463,7 @@ class SshSessionWorker(
 
     private fun handleConnectionLost() {
         if (shutdownRequested.get()) return
+        connectedSince = 0L
         recordError("reader", Exception("Connection lost"))
         transition(State.DISCONNECTED)
         reconnectWithBackoff()
