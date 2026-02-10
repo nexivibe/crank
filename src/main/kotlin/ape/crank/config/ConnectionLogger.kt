@@ -14,12 +14,13 @@ object ConnectionLogger {
     private val logFile = PlatformPaths.configDir().resolve("connection.log")
 
     @Synchronized
-    fun log(state: String, name: String, uuid: String) {
+    fun log(state: String, name: String, uuid: String, host: String = "", error: String? = null) {
         try {
             val now = Instant.now()
             val unixMs = now.toEpochMilli()
             val iso = isoFormatter.format(now)
-            val line = "$state,$name,$uuid,$unixMs,$iso\n"
+            val escapedError = error?.replace(",", ";")?.replace("\n", " ") ?: ""
+            val line = "$state,$name,$uuid,$host,$unixMs,$iso,$escapedError\n"
 
             Files.createDirectories(logFile.parent)
             Files.newBufferedWriter(logFile, StandardOpenOption.CREATE, StandardOpenOption.APPEND).use {

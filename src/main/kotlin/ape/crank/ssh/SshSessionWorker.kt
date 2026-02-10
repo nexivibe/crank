@@ -154,10 +154,10 @@ class SshSessionWorker(
     // ------------------------------------------------------------------ internal state
 
     private val state = AtomicReference(State.DISCONNECTED)
-    private var session: ClientSession? = null
-    private var channel: ChannelShell? = null
-    private var channelOutput: OutputStream? = null
-    private var readerThread: Thread? = null
+    @Volatile private var session: ClientSession? = null
+    @Volatile private var channel: ChannelShell? = null
+    @Volatile private var channelOutput: OutputStream? = null
+    @Volatile private var readerThread: Thread? = null
     private val reconnectAttempt = AtomicInteger(0)
     private val reconnectEnabled = AtomicBoolean(false)
     private val shutdownRequested = AtomicBoolean(false)
@@ -314,8 +314,10 @@ class SshSessionWorker(
 
     fun disconnect() {
         try {
-            readerThread?.interrupt()
+            val rt = readerThread
             readerThread = null
+            rt?.interrupt()
+            rt?.join(2000)
             channel?.close(false)
             channel = null
             channelOutput = null
@@ -343,35 +345,43 @@ class SshSessionWorker(
         transition(State.RECONNECTING)
 
         val thread = Thread({
-            while (reconnectEnabled.get() && !shutdownRequested.get()) {
-                val attempt = reconnectAttempt.getAndIncrement()
-                val baseDelay = minOf(1000L * (1L shl minOf(attempt, 16)), 60_000L)
-                val jitter = (baseDelay * 0.25 * (Math.random() * 2 - 1)).toLong()
-                val delay = maxOf(baseDelay + jitter, 500L)
+            try {
+                while (reconnectEnabled.get() && !shutdownRequested.get()) {
+                    val attempt = reconnectAttempt.getAndIncrement()
+                    val baseDelay = minOf(1000L * (1L shl minOf(attempt, 16)), 60_000L)
+                    val jitter = (baseDelay * 0.25 * (Math.random() * 2 - 1)).toLong()
+                    val delay = maxOf(baseDelay + jitter, 500L)
 
-                nextReconnectTimeMs = System.currentTimeMillis() + delay
+                    nextReconnectTimeMs = System.currentTimeMillis() + delay
 
-                System.err.println(
-                    "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} in ${delay}ms"
-                )
-
-                try { Thread.sleep(delay) } catch (_: InterruptedException) { break }
-
-                nextReconnectTimeMs = 0
-                if (shutdownRequested.get() || !reconnectEnabled.get()) break
-
-                try {
-                    disconnect()
-                    connect()
-                    reconnectEnabled.set(false)
-                    return@Thread
-                } catch (e: Exception) {
-                    recordError("reconnect attempt ${attempt + 1}", e)
                     System.err.println(
-                        "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} failed: $lastErrorMessage"
+                        "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} in ${delay}ms"
                     )
-                    transition(State.RECONNECTING)
+
+                    try { Thread.sleep(delay) } catch (_: InterruptedException) { break }
+
+                    nextReconnectTimeMs = 0
+                    if (shutdownRequested.get() || !reconnectEnabled.get()) break
+
+                    try {
+                        disconnect()
+                        connect()
+                        reconnectEnabled.set(false)
+                        return@Thread
+                    } catch (e: Exception) {
+                        recordError("reconnect attempt ${attempt + 1}", e)
+                        System.err.println(
+                            "[SshSessionWorker:$sessionId] reconnect attempt ${attempt + 1} failed: $lastErrorMessage"
+                        )
+                        transition(State.RECONNECTING)
+                    }
                 }
+            } finally {
+                // Ensure we never get stuck in RECONNECTING if the loop exits without connecting
+                if (state.get() == State.RECONNECTING) {
+                    transition(State.DISCONNECTED)
+                }
+                nextReconnectTimeMs = 0
             }
         }, "ssh-reconnect-$sessionId")
         thread.isDaemon = true
@@ -434,10 +444,10 @@ class SshSessionWorker(
                 val input = shell.invertedOut
                 while (!Thread.currentThread().isInterrupted && isConnected()) {
                     val n = input.read(buf)
+                    // Check generation immediately after read unblocks
+                    if (connectionGeneration.get() != generation) break
                     if (n == -1) break
                     if (n > 0) {
-                        // Drop data from stale reader after reconnection
-                        if (connectionGeneration.get() != generation) break
                         bytesReceived.addAndGet(n.toLong())
                         synchronized(recentChunks) {
                             recentChunks.add(Pair(System.currentTimeMillis(), n))
@@ -463,9 +473,10 @@ class SshSessionWorker(
 
     private fun handleConnectionLost() {
         if (shutdownRequested.get()) return
+        // CAS guard: only the first caller triggers reconnection
+        if (!state.compareAndSet(State.CONNECTED, State.DISCONNECTED)) return
         connectedSince = 0L
-        recordError("reader", Exception("Connection lost"))
-        transition(State.DISCONNECTED)
+        recordError("connection", Exception("Connection lost"))
         reconnectWithBackoff()
     }
 }

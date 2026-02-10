@@ -1,6 +1,7 @@
 package ape.crank.ui
 
 import ape.crank.config.ConnectionLogger
+import ape.crank.config.PlatformPaths
 import ape.crank.config.StateManager
 import ape.crank.model.ConnectionConfig
 import ape.crank.model.SessionFolder
@@ -45,8 +46,9 @@ class MainWindow(private val stateManager: StateManager) {
     private val sessionTreeView = SessionTreeView()
     private val terminalWidget = TerminalWidget()
     private val terminalStatusBar = TerminalStatusBar()
-    private val clipboardToggle = ToggleButton("Clipboard", CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0)).apply {
+    private val clipboardToggle = ToggleButton(null, CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0)).apply {
         style = "-fx-font-size: 11;"
+        tooltip = Tooltip("Toggle local clipboard mode")
         isSelected = true
         selectedProperty().addListener { _, _, newVal ->
             terminalWidget.localClipboardMode = newVal
@@ -152,7 +154,9 @@ class MainWindow(private val stateManager: StateManager) {
         val settingsMenu = Menu("Settings")
         val connectionsItem = MenuItem("Connections...")
         connectionsItem.setOnAction { openConnectionsDialog() }
-        settingsMenu.items.add(connectionsItem)
+        val connectionLogItem = MenuItem("Connection Log...", CrankIcons.icon(CrankIcons.DOCUMENT_TEXT, size = 14.0))
+        connectionLogItem.setOnAction { openConnectionLogViewer() }
+        settingsMenu.items.addAll(connectionsItem, connectionLogItem)
         menuBar.menus.add(settingsMenu)
     }
 
@@ -283,6 +287,8 @@ class MainWindow(private val stateManager: StateManager) {
                 updateGlobalStatusBar()
                 updateWindowTitle()
                 updateBandwidthList()
+                // Single refresh after all data updates — avoids per-session null-swap flicker
+                sessionTreeView.refreshCells()
             })
         )
         timeline.cycleCount = Timeline.INDEFINITE
@@ -370,6 +376,13 @@ class MainWindow(private val stateManager: StateManager) {
         dialog.showAndWait()
         stateManager.save()
         updateGlobalStatusBar()
+    }
+
+    fun openConnectionLogViewer() {
+        val logFile = PlatformPaths.configDir().resolve("connection.log")
+        val dialog = ConnectionLogViewer(logFile)
+        dialog.initOwner(stage)
+        dialog.showAndWait()
     }
 
     fun createNewTerminal(folderId: String? = null) {
@@ -491,18 +504,22 @@ class MainWindow(private val stateManager: StateManager) {
 
         worker.onStateChanged = { newState ->
             sessionStateCache[session.id] = newState
+            val connHost = stateManager.state.connections
+                .find { it.id == session.connectionId }
+                ?.let { "${it.username}@${it.host}:${it.port}" } ?: ""
             // Reset parser state machine on reconnection to prevent garbled
             // output from stale partial escape sequences
             if (newState == SshSessionWorker.State.CONNECTED) {
                 terminalParsers[session.id]?.reset()
-                ConnectionLogger.log("active", session.name, session.id)
+                ConnectionLogger.log("active", session.name, session.id, connHost)
             } else if (newState == SshSessionWorker.State.DISCONNECTED) {
-                ConnectionLogger.log("inactive", session.name, session.id)
+                ConnectionLogger.log("inactive", session.name, session.id, connHost, worker.lastErrorMessage)
             }
             val thresholdMs = stateManager.state.inactivityThresholdSeconds * 1000L
             val inactive = isSessionInactive(session.id, thresholdMs)
             Platform.runLater {
                 sessionTreeView.updateSessionStatus(session.id, newState, inactive)
+                sessionTreeView.refreshCells()
                 updateGlobalStatusBar()
                 if (currentSessionId == session.id) {
                     updateTerminalStatusBar()
@@ -513,6 +530,7 @@ class MainWindow(private val stateManager: StateManager) {
         terminalParsers[session.id]?.onTitleChanged = { title ->
             Platform.runLater {
                 sessionTreeView.updateSessionTitle(session.id, title)
+                sessionTreeView.refreshCells()
             }
         }
 

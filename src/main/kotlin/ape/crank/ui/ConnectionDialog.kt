@@ -30,10 +30,12 @@ class ConnectionDialog(
     private val portSpinner = Spinner<Int>(1, 65535, 22)
     private val usernameField = TextField()
     private val privateKeyPathField = TextField()
-    private val browseButton = Button("Browse", CrankIcons.icon(CrankIcons.FOLDER_OPEN, size = 14.0))
+    private val browseButton = Button(null, CrankIcons.icon(CrankIcons.FOLDER_OPEN, size = 14.0)).apply {
+        tooltip = Tooltip("Browse for private key file")
+    }
     private val knownHostsPolicyCombo = ComboBox<KnownHostsPolicy>()
-    private val keepAliveSpinner = Spinner<Int>(0, 3600, 0)
-    private val connectionTimeoutSpinner = Spinner<Int>(0, 300, 0)
+    private val keepAliveSpinner = Spinner<Int>(0, 3600, 30)
+    private val connectionTimeoutSpinner = Spinner<Int>(0, 300, 30)
     private val compressionCheckBox = CheckBox("Enable compression")
     private val initialCommandField = TextField()
     private val labelField = TextField()
@@ -225,10 +227,14 @@ class ConnectionDialog(
 
     private fun setupLayout() {
         // Bottom buttons
-        val addButton = Button("Add", CrankIcons.icon(CrankIcons.PLUS_CIRCLE, size = 14.0))
+        val addButton = Button(null, CrankIcons.icon(CrankIcons.PLUS_CIRCLE, size = 14.0)).apply {
+            tooltip = Tooltip("Add new connection")
+        }
         addButton.setOnAction { addNewConnection() }
 
-        val removeButton = Button("Remove", CrankIcons.icon(CrankIcons.TRASH, size = 14.0))
+        val removeButton = Button(null, CrankIcons.icon(CrankIcons.TRASH, size = 14.0)).apply {
+            tooltip = Tooltip("Remove selected connection")
+        }
         removeButton.setOnAction { removeSelectedConnection() }
 
         val buttonBar = HBox(10.0, addButton, removeButton)
@@ -408,8 +414,8 @@ class ConnectionDialog(
         usernameField.text = ""
         privateKeyPathField.text = ""
         knownHostsPolicyCombo.value = KnownHostsPolicy.ACCEPT_NEW
-        keepAliveSpinner.valueFactory.value = 0
-        connectionTimeoutSpinner.valueFactory.value = 0
+        keepAliveSpinner.valueFactory.value = 30
+        connectionTimeoutSpinner.valueFactory.value = 30
         compressionCheckBox.isSelected = false
         initialCommandField.text = ""
         labelField.text = ""

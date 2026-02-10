@@ -77,17 +77,21 @@ class SessionTreeView : VBox() {
 
     private val bandwidthListView = ListView<BandwidthEntry>()
     private val bandwidthItems = FXCollections.observableArrayList<BandwidthEntry>()
-    private val focusModeToggle = ToggleButton("Focus", CrankIcons.icon(CrankIcons.EYE))
+    private val focusModeToggle = ToggleButton(null, CrankIcons.icon(CrankIcons.EYE)).apply {
+        tooltip = Tooltip("Focus mode — bandwidth-sorted session list")
+    }
     private var focusModeActive = false
 
     // ------------------------------------------------------------------ init
 
     init {
         // ---------- toolbar ----------
-        val newTerminalBtn = Button("Terminal", CrankIcons.icon(CrankIcons.TERMINAL)).apply {
+        val newTerminalBtn = Button(null, CrankIcons.icon(CrankIcons.TERMINAL)).apply {
+            tooltip = Tooltip("New terminal session")
             setOnAction { onNewTerminalRequested?.invoke(getSelectedFolderId()) }
         }
-        val newFolderBtn = Button("Folder", CrankIcons.icon(CrankIcons.FOLDER_PLUS)).apply {
+        val newFolderBtn = Button(null, CrankIcons.icon(CrankIcons.FOLDER_PLUS)).apply {
+            tooltip = Tooltip("New folder")
             setOnAction { onNewFolderRequested?.invoke() }
         }
         focusModeToggle.setOnAction { toggleFocusMode() }
@@ -195,27 +199,20 @@ class SessionTreeView : VBox() {
     }
 
     /**
-     * Update the visual status indicator for a specific session.
+     * Update the status data for a specific session.
+     * Does NOT trigger a cell re-render — call [refreshCells] after all updates.
      */
     fun updateSessionStatus(sessionId: String, state: SshSessionWorker.State, inactive: Boolean) {
         sessionStatuses[sessionId] = SessionStatus(state, inactive)
-        // Force the cell to re-render by triggering a tree refresh on the specific item
-        Platform.runLater {
-            val item = sessionTreeItems[sessionId]
-            if (item != null) {
-                // Setting the value again triggers a cell update
-                val current = item.value
-                item.value = null
-                item.value = current
+    }
 
-                // Also refresh the parent folder so its status aggregation updates
-                val parent = item.parent
-                if (parent != null && parent != hiddenRoot) {
-                    val parentVal = parent.value
-                    parent.value = null
-                    parent.value = parentVal
-                }
-            }
+    /**
+     * Re-render all visible tree cells in a single pass (no null-swap flicker).
+     * Call this once per update cycle after updating status/bandwidth/title data.
+     */
+    fun refreshCells() {
+        Platform.runLater {
+            treeView.refresh()
         }
     }
 
@@ -234,18 +231,11 @@ class SessionTreeView : VBox() {
     }
 
     /**
-     * Update the terminal title for a session and refresh its tree cell.
+     * Update the terminal title for a session.
+     * Does NOT trigger a cell re-render — call [refreshCells] after all updates.
      */
     fun updateSessionTitle(sessionId: String, title: String) {
         sessionTitles[sessionId] = title
-        Platform.runLater {
-            val item = sessionTreeItems[sessionId]
-            if (item != null) {
-                val current = item.value
-                item.value = null
-                item.value = current
-            }
-        }
     }
 
     /**
@@ -558,12 +548,7 @@ class SessionTreeView : VBox() {
             if (result.isPresent && result.get().isNotBlank()) {
                 session.name = result.get().trim()
                 onSessionRenamed?.invoke(session)
-                val item = sessionTreeItems[session.id]
-                if (item != null) {
-                    val current = item.value
-                    item.value = null
-                    item.value = current
-                }
+                treeView.refresh()
             }
         }
 
@@ -594,13 +579,7 @@ class SessionTreeView : VBox() {
             if (result.isPresent && result.get().isNotBlank()) {
                 folder.name = result.get().trim()
                 onFolderRenamed?.invoke(folder)
-                // Trigger a refresh of this item's cell
-                val item = folderTreeItems[folder.id]
-                if (item != null) {
-                    val current = item.value
-                    item.value = null
-                    item.value = current
-                }
+                treeView.refresh()
             }
         }
 
