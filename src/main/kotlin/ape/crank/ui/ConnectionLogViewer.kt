@@ -46,13 +46,14 @@ class ConnectionLogViewer(private val logFile: Path) : Dialog<Void>() {
         dialogPane.prefHeight = 700.0
 
         val entries = parseLog(logFile)
+        val observableEntries = FXCollections.observableArrayList(entries)
 
         val chart = buildChart(entries)
         val searchField = TextField().apply {
             promptText = "Search across all columns..."
         }
 
-        val table = buildTable(entries, searchField)
+        val table = buildTable(observableEntries, searchField)
 
         val deleteButton = Button(null, CrankIcons.icon(CrankIcons.TRASH, size = 14.0, color = javafx.scene.paint.Color.web("#E04040"))).apply {
             tooltip = Tooltip("Delete all connection logs")
@@ -68,7 +69,7 @@ class ConnectionLogViewer(private val logFile: Path) : Dialog<Void>() {
                     try {
                         Files.deleteIfExists(logFile)
                     } catch (_: Exception) { }
-                    table.items.clear()
+                    observableEntries.clear()
                     chart.data.clear()
                 }
             }
@@ -155,8 +156,7 @@ class ConnectionLogViewer(private val logFile: Path) : Dialog<Void>() {
         }
     }
 
-    private fun buildTable(entries: List<LogEntry>, searchField: TextField): TableView<LogEntry> {
-        val observableEntries = FXCollections.observableArrayList(entries)
+    private fun buildTable(observableEntries: javafx.collections.ObservableList<LogEntry>, searchField: TextField): TableView<LogEntry> {
         val filteredList = FilteredList(observableEntries) { true }
 
         searchField.textProperty().addListener { _, _, newValue ->
