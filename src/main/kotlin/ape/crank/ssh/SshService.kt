@@ -67,6 +67,17 @@ class SshService {
             System.err.println("[SshService] failed to set TCP keepalive: ${e.message}")
         }
 
+        // Disable MINA SSHD's default 10-minute idle timeout. The default causes sessions
+        // to be closed after ~10 minutes of inactivity at the NIO layer, even when
+        // SSH_MSG_IGNORE heartbeats are configured per-session. Crank manages connection
+        // liveness via heartbeats and auto-reconnect, so this client-level timeout is
+        // unnecessary and actively harmful.
+        try {
+            CoreModuleProperties.IDLE_TIMEOUT.set(client, java.time.Duration.ZERO)
+        } catch (e: Exception) {
+            System.err.println("[SshService] failed to disable idle timeout: ${e.message}")
+        }
+
         client.start()
         return client
     }
