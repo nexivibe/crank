@@ -46,12 +46,39 @@ class MainWindow(private val stateManager: StateManager) {
     private val sessionTreeView = SessionTreeView()
     private val terminalWidget = TerminalWidget()
     private val terminalStatusBar = TerminalStatusBar()
-    private val clipboardToggle = ToggleButton(null, CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0)).apply {
-        style = "-fx-font-size: 11;"
-        tooltip = Tooltip("Toggle local clipboard mode")
+    private val clipboardStatusLabel = Label("Clipboard ON").apply {
+        style = "-fx-text-fill: #4EC94E; -fx-font-size: 11;"
+    }
+    private val clipboardToggle = ToggleButton(null, CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0, color = javafx.scene.paint.Color.web("#4EC94E"))).apply {
+        style = "-fx-font-size: 11; -fx-background-color: transparent; -fx-border-color: #4EC94E; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3; -fx-padding: 2 4 2 4;"
+        tooltip = Tooltip("Toggle local clipboard mode (Ctrl+C copy / Ctrl+V paste)")
         isSelected = true
-        selectedProperty().addListener { _, _, newVal ->
-            terminalWidget.localClipboardMode = newVal
+        selectedProperty().addListener { _, _, enabled ->
+            terminalWidget.localClipboardMode = enabled
+            updateClipboardVisuals(enabled)
+        }
+    }
+    private val clipboardDisabledPill = Label("\u26A0 Clipboard Disabled").apply {
+        style = "-fx-background-color: #8B0000; -fx-text-fill: #FFFFFF; -fx-font-size: 11; -fx-padding: 2 8 2 8; -fx-background-radius: 10;"
+        isVisible = false
+        isManaged = false
+    }
+
+    private fun updateClipboardVisuals(enabled: Boolean) {
+        if (enabled) {
+            clipboardStatusLabel.text = "Clipboard ON"
+            clipboardStatusLabel.style = "-fx-text-fill: #4EC94E; -fx-font-size: 11;"
+            clipboardToggle.graphic = CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0, color = javafx.scene.paint.Color.web("#4EC94E"))
+            clipboardToggle.style = "-fx-font-size: 11; -fx-background-color: transparent; -fx-border-color: #4EC94E; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3; -fx-padding: 2 4 2 4;"
+            clipboardDisabledPill.isVisible = false
+            clipboardDisabledPill.isManaged = false
+        } else {
+            clipboardStatusLabel.text = "Clipboard OFF"
+            clipboardStatusLabel.style = "-fx-text-fill: #E04040; -fx-font-size: 11;"
+            clipboardToggle.graphic = CrankIcons.icon(CrankIcons.CLIPBOARD, size = 14.0, color = javafx.scene.paint.Color.web("#E04040"))
+            clipboardToggle.style = "-fx-font-size: 11; -fx-background-color: #3A1A1A; -fx-border-color: #E04040; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3; -fx-padding: 2 4 2 4;"
+            clipboardDisabledPill.isVisible = true
+            clipboardDisabledPill.isManaged = true
         }
     }
     private val placeholderLabel = Label("Select or create a terminal session").apply {
@@ -239,7 +266,7 @@ class MainWindow(private val stateManager: StateManager) {
         }
 
         rightPane.center = terminalWithMission
-        val bottomBar = HBox(8.0, clipboardToggle, terminalStatusBar).apply {
+        val bottomBar = HBox(8.0, clipboardToggle, clipboardStatusLabel, terminalStatusBar).apply {
             alignment = Pos.CENTER_LEFT
             HBox.setHgrow(terminalStatusBar, Priority.ALWAYS)
         }
@@ -274,7 +301,7 @@ class MainWindow(private val stateManager: StateManager) {
     private fun initGlobalStatusBar() {
         globalStatusBar.alignment = Pos.CENTER_LEFT
         globalStatusBar.padding = Insets(4.0, 8.0, 4.0, 8.0)
-        globalStatusBar.children.addAll(connectionCountLabel, activeCountLabel)
+        globalStatusBar.children.addAll(connectionCountLabel, activeCountLabel, clipboardDisabledPill)
     }
 
     // ------------------------------------------------------------------ periodic status updates
@@ -513,7 +540,7 @@ class MainWindow(private val stateManager: StateManager) {
                 terminalParsers[session.id]?.reset()
                 ConnectionLogger.log("active", session.name, session.id, connHost)
             } else if (newState == SshSessionWorker.State.DISCONNECTED) {
-                ConnectionLogger.log("inactive", session.name, session.id, connHost, worker.lastErrorMessage)
+                ConnectionLogger.log("inactive", session.name, session.id, connHost, worker.lastErrorMessage, worker.lastSessionDurationMs)
             }
             val thresholdMs = stateManager.state.inactivityThresholdSeconds * 1000L
             val inactive = isSessionInactive(session.id, thresholdMs)

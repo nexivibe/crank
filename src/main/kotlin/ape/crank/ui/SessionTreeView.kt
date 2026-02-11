@@ -410,14 +410,20 @@ class SessionTreeView : VBox() {
                 text = null
                 graphic = null
                 contextMenu = null
+                style = ""
                 return
             }
+
+            // Zero cell padding so the graphic controls all spacing
+            style = "-fx-padding: 0;"
 
             when (item) {
                 is SessionFolder -> {
                     text = null
                     graphic = buildFolderGraphic(item)
                     contextMenu = buildFolderContextMenu(item)
+                    // Vertically center the disclosure arrow with the folder content
+                    disclosureNode?.style = "-fx-padding: 4 4 4 0;"
                 }
                 is TerminalSession -> {
                     text = null
@@ -470,7 +476,7 @@ class SessionTreeView : VBox() {
 
         return HBox(4.0, folderIcon, statusCircle, nameLabel, countLabel).apply {
             alignment = Pos.CENTER_LEFT
-            padding = Insets(4.0, 6.0, 4.0, 2.0)
+            padding = Insets(4.0, 6.0, 4.0, 0.0)
         }
     }
 

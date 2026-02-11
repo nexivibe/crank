@@ -34,7 +34,8 @@ class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
         val host: String,
         val unixMs: Long,
         val iso: String,
-        val error: String
+        val error: String,
+        val duration: String
     )
 
     init {
@@ -75,7 +76,8 @@ class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
                 host = parts.getOrElse(3) { "" }.trim(),
                 unixMs = parts.getOrElse(4) { "0" }.trim().toLongOrNull() ?: 0L,
                 iso = parts.getOrElse(5) { "" }.trim(),
-                error = parts.getOrElse(6) { "" }.trim()
+                error = parts.getOrElse(6) { "" }.trim(),
+                duration = parts.getOrElse(7) { "" }.trim()
             )
         }
     }
@@ -141,7 +143,8 @@ class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
                     entry.name.lowercase().contains(lower) ||
                     entry.host.lowercase().contains(lower) ||
                     entry.uuid.lowercase().contains(lower) ||
-                    entry.error.lowercase().contains(lower)
+                    entry.error.lowercase().contains(lower) ||
+                    entry.duration.lowercase().contains(lower)
             }
         }
 
@@ -188,12 +191,16 @@ class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
             cellValueFactory = javafx.util.Callback { SimpleStringProperty(it.value.uuid) }
             prefWidth = 120.0
         }
+        val durationCol = TableColumn<LogEntry, String>("Duration").apply {
+            cellValueFactory = javafx.util.Callback { SimpleStringProperty(it.value.duration) }
+            prefWidth = 100.0
+        }
         val errorCol = TableColumn<LogEntry, String>("Error").apply {
             cellValueFactory = javafx.util.Callback { SimpleStringProperty(it.value.error) }
             prefWidth = 180.0
         }
 
-        table.columns.addAll(timeCol, stateCol, nameCol, hostCol, uuidCol, errorCol)
+        table.columns.addAll(timeCol, stateCol, nameCol, hostCol, uuidCol, durationCol, errorCol)
 
         // Default sort: time descending (most recent first)
         timeCol.sortType = TableColumn.SortType.DESCENDING

@@ -4,6 +4,7 @@ import ape.crank.model.ConnectionConfig
 import ape.crank.model.TerminalSession
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.common.compression.BuiltinCompressions
+import org.apache.sshd.core.CoreModuleProperties
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -56,6 +57,16 @@ class SshService {
             BuiltinCompressions.zlib,
             BuiltinCompressions.delayedZlib
         )
+
+        // Enable TCP keepalive on the socket — matches OpenSSH's default TCPKeepAlive=yes.
+        // This lets the OS detect dead connections through NAT/firewalls, which is the most
+        // likely reason Crank drops connections while GNOME Terminal (OpenSSH) doesn't.
+        try {
+            CoreModuleProperties.SOCKET_KEEPALIVE.set(client, true)
+        } catch (e: Exception) {
+            System.err.println("[SshService] failed to set TCP keepalive: ${e.message}")
+        }
+
         client.start()
         return client
     }

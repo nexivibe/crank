@@ -9,7 +9,9 @@ import org.apache.sshd.client.keyverifier.DefaultKnownHostsServerKeyVerifier
 import org.apache.sshd.client.keyverifier.ServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.keyprovider.FileKeyPairProvider
+import org.apache.sshd.common.session.Session
 import org.apache.sshd.common.session.SessionHeartbeatController
+import org.apache.sshd.common.session.SessionListener
 import java.io.OutputStream
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -65,6 +67,8 @@ class SshSessionWorker(
         private set
     val reconnectAttemptNumber: Int get() = reconnectAttempt.get()
     @Volatile var connectedSince: Long = 0L
+        private set
+    @Volatile var lastSessionDurationMs: Long = 0L
         private set
     val bytesSent = AtomicLong(0)
     val bytesReceived = AtomicLong(0)
@@ -232,6 +236,16 @@ class SshSessionWorker(
                 )
             }
 
+            // Listen for session close events — provides faster disconnect detection
+            // than waiting for the reader thread to get EOF/error
+            newSession.addSessionListener(object : SessionListener {
+                override fun sessionClosed(closedSession: Session) {
+                    if (!shutdownRequested.get() && !reconnectEnabled.get()) {
+                        handleConnectionLost()
+                    }
+                }
+            })
+
             // -- Open shell channel
             val shell = newSession.createShellChannel()
             shell.setPtyType("xterm-256color")
@@ -254,6 +268,7 @@ class SshSessionWorker(
 
             val generation = connectionGeneration.incrementAndGet()
             connectedSince = System.currentTimeMillis()
+            lastSessionDurationMs = 0L
             transition(State.CONNECTED)
             startReaderThread(shell, generation)
 
@@ -326,6 +341,9 @@ class SshSessionWorker(
         } catch (e: Exception) {
             System.err.println("[SshSessionWorker:$sessionId] disconnect error: ${e.message}")
         } finally {
+            if (connectedSince > 0) {
+                lastSessionDurationMs = System.currentTimeMillis() - connectedSince
+            }
             connectedSince = 0L
             transition(State.DISCONNECTED)
         }
@@ -475,6 +493,9 @@ class SshSessionWorker(
         if (shutdownRequested.get()) return
         // CAS guard: only the first caller triggers reconnection
         if (!state.compareAndSet(State.CONNECTED, State.DISCONNECTED)) return
+        if (connectedSince > 0) {
+            lastSessionDurationMs = System.currentTimeMillis() - connectedSince
+        }
         connectedSince = 0L
         recordError("connection", Exception("Connection lost"))
         reconnectWithBackoff()
