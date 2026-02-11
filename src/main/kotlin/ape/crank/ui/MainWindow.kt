@@ -178,13 +178,19 @@ class MainWindow(private val stateManager: StateManager) {
     // ------------------------------------------------------------------ menu bar
 
     private fun initMenuBar() {
-        val settingsMenu = Menu("Settings")
+        val networkMenu = Menu("Network")
         val connectionsItem = MenuItem("Connections...")
         connectionsItem.setOnAction { openConnectionsDialog() }
         val connectionLogItem = MenuItem("Connection Log...", CrankIcons.icon(CrankIcons.DOCUMENT_TEXT, size = 14.0))
         connectionLogItem.setOnAction { openConnectionLogViewer() }
-        settingsMenu.items.addAll(connectionsItem, connectionLogItem)
-        menuBar.menus.add(settingsMenu)
+        networkMenu.items.addAll(connectionsItem, connectionLogItem)
+
+        val aboutMenu = Menu("About")
+        val aboutItem = MenuItem("About Crank...")
+        aboutItem.setOnAction { openAboutDialog() }
+        aboutMenu.items.add(aboutItem)
+
+        menuBar.menus.addAll(networkMenu, aboutMenu)
     }
 
     // ------------------------------------------------------------------ session tree
@@ -412,12 +418,59 @@ class MainWindow(private val stateManager: StateManager) {
         dialog.showAndWait()
     }
 
+    private fun openAboutDialog() {
+        val dialog = Dialog<Void>()
+        dialog.title = "About Crank"
+        dialog.initOwner(stage)
+        dialog.isResizable = false
+
+        val heading = Label("CRANK").apply {
+            style = "-fx-font-size: 28; -fx-font-weight: bold; -fx-text-fill: #E0E0E0;"
+        }
+        val subtitle = Label("The SSH Terminal Manager").apply {
+            style = "-fx-font-size: 14; -fx-text-fill: #A0A0A0; -fx-padding: 0 0 8 0;"
+        }
+        val studioLabel = Label("A NexiVIBE Studio Production").apply {
+            style = "-fx-font-size: 13; -fx-font-weight: bold; -fx-text-fill: #4EC94E; -fx-padding: 0 0 12 0;"
+        }
+
+        val description = Label(
+            "Built for engineers who manage fleets, not just servers. " +
+            "Crank is a pure-JVM desktop command center for power users who need " +
+            "100+ simultaneous SSH sessions with auto-reconnect, real-time activity " +
+            "monitoring, and full VT100/xterm terminal emulation.\n\n" +
+            "Spin up your fleet. Pop agents everywhere. Walk away. Come back. " +
+            "Everything is still running. That's not a feature \u2014 that's a lifestyle.\n\n" +
+            "NexiVIBE is a studio full of vibes \u2014 building tools for engineers who " +
+            "think \"too many terminals\" is a challenge, not a problem."
+        ).apply {
+            isWrapText = true
+            maxWidth = 420.0
+            style = "-fx-font-size: 12; -fx-text-fill: #C0C0C0; -fx-line-spacing: 2;"
+        }
+
+        val techLine = Label("Kotlin \u2022 JavaFX \u2022 Apache MINA SSHD \u2022 Pure JVM").apply {
+            style = "-fx-font-size: 11; -fx-text-fill: #707070; -fx-padding: 12 0 0 0;"
+        }
+
+        val content = VBox(4.0).apply {
+            alignment = Pos.CENTER
+            padding = Insets(20.0, 30.0, 10.0, 30.0)
+            children.addAll(heading, subtitle, studioLabel, description, techLine)
+        }
+
+        dialog.dialogPane.content = content
+        dialog.dialogPane.buttonTypes.add(ButtonType.CLOSE)
+        dialog.dialogPane.style = "-fx-background-color: #1E1E1E;"
+        dialog.showAndWait()
+    }
+
     fun createNewTerminal(folderId: String? = null) {
         if (stateManager.state.connections.isEmpty()) {
             Alert(Alert.AlertType.INFORMATION).apply {
                 title = "No Connections"
                 headerText = "No connections configured"
-                contentText = "Please add a connection in Settings > Connections first."
+                contentText = "Please add a connection in Network > Connections first."
             }.showAndWait()
             return
         }

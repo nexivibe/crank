@@ -11,6 +11,7 @@ import javafx.scene.chart.NumberAxis
 import javafx.scene.chart.XYChart
 import javafx.scene.control.*
 import javafx.scene.control.cell.PropertyValueFactory
+import javafx.scene.layout.HBox
 import javafx.scene.layout.Priority
 import javafx.scene.layout.VBox
 import java.nio.file.Files
@@ -25,7 +26,7 @@ import java.time.temporal.ChronoUnit
  * Dialog that displays the connection.log CSV file as a searchable table
  * with a bar chart showing disconnect counts over the last 24 hours.
  */
-class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
+class ConnectionLogViewer(private val logFile: Path) : Dialog<Void>() {
 
     data class LogEntry(
         val state: String,
@@ -53,9 +54,33 @@ class ConnectionLogViewer(logFile: Path) : Dialog<Void>() {
 
         val table = buildTable(entries, searchField)
 
+        val deleteButton = Button(null, CrankIcons.icon(CrankIcons.TRASH, size = 14.0, color = javafx.scene.paint.Color.web("#E04040"))).apply {
+            tooltip = Tooltip("Delete all connection logs")
+            style = "-fx-background-color: transparent; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3; -fx-cursor: hand;"
+            setOnAction {
+                val confirm = Alert(Alert.AlertType.CONFIRMATION).apply {
+                    title = "Delete Logs"
+                    headerText = "Delete all connection logs?"
+                    contentText = "This will permanently remove all log entries. This action cannot be undone."
+                }
+                val result = confirm.showAndWait()
+                if (result.isPresent && result.get() == ButtonType.OK) {
+                    try {
+                        Files.deleteIfExists(logFile)
+                    } catch (_: Exception) { }
+                    table.items.clear()
+                    chart.data.clear()
+                }
+            }
+        }
+
+        val toolbar = HBox(8.0, searchField, deleteButton).apply {
+            HBox.setHgrow(searchField, Priority.ALWAYS)
+        }
+
         val content = VBox(8.0).apply {
             padding = Insets(12.0)
-            children.addAll(chart, searchField, table)
+            children.addAll(chart, toolbar, table)
             VBox.setVgrow(table, Priority.ALWAYS)
         }
 
