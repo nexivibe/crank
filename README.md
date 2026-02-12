@@ -7,6 +7,9 @@
 > *"How many SSH sessions do you have open?"*
 > *"Yes."*
 
+> *"You should really close some of those terminals."*
+> *"You should really mind your own business."*
+
 ---
 
 ## What Is This
@@ -83,6 +86,29 @@ Here's the play that nobody else sees coming:
 6. **Scale without mercy.** Other people are limited by the number of terminal tabs they can keep track of. You are limited by nothing. Your left panel is a war room. Your right panel is the battlefield. The status bar is your intelligence feed. Focus Mode puts the idle sessions at the top so the ones that need attention find *you*.
 
 This is vibe infrastructure. This is going full crank. This is what happens when an engineer decides that the bottleneck isn't compute — it's **visibility**.
+
+## Why 2026 Is the Year You Go Crank (Or 2027 Eats You Alive)
+
+Let's talk about what's actually happening out there.
+
+AI agents are multiplying like rabbits in a server farm. Every team is deploying autonomous coding agents, monitoring agents, deployment agents, agents that watch other agents, and agents that apologize when the other agents break things. The number of machines you interact with daily went from "a few" to "dear god" somewhere around Q3 2025, and it's only accelerating.
+
+2027 is going to be **feral**. The people who survive it will be the ones who built their cockpit in 2026. Not the people who were still opening individual SSH connections in separate terminal tabs like it's 2019 and they only have three servers named after Lord of the Rings characters.
+
+Here's the math that nobody wants to do:
+- **2025**: You had 5-10 machines. You could name them. You remembered their IPs. You were fine.
+- **2026**: You have 30-80 machines. Some of them are running agents that spin up *more* machines. You're starting to lose track. Your terminal tabs look like a browser history you'd rather not explain.
+- **2027**: You have 100-500 active sessions across ephemeral infrastructure, persistent fleet, and an army of AI agents that expect you to be watching. If you don't have a command center, you don't have control. If you don't have control, you're not engineering — you're guessing.
+
+Going Crank in 2026 means:
+- You **see everything** before it becomes a problem in 2027
+- You **build the muscle memory** for fleet-scale terminal management before fleet-scale is mandatory
+- You **set up `screen`-backed sessions** on every machine so that when 2027 hits and your infrastructure is three times the size, your workflow doesn't change — it just scales
+- You **stop being the bottleneck** between "agent finished task on box 47" and "engineer noticed 35 minutes later"
+
+The engineers who go Crank in 2026 will walk into 2027 with a war room already built, muscle memory already trained, and a bandwidth-metered view of their entire fleet pulsing on screen like a heartbeat monitor. Everyone else will be opening their 94th terminal tab and wondering why they feel like they're drowning.
+
+**2027 is not going to be gentle. Go Crank now, or get cranked later.**
 
 ## Features
 
@@ -239,6 +265,48 @@ A: You'll understand when you get there. And when you do, Crank will be waiting.
 **Q: Is this just a terminal multiplexer?**
 A: A terminal multiplexer shows you one machine at a time. Crank shows you your entire fleet at a glance — connection state, bandwidth, activity, organization — and lets you jump between any of them instantly. It's the difference between driving one car and running an air traffic control tower. Both involve steering. Only one involves *scale*.
 
+**Q: My manager says I don't need this many terminals open.**
+A: Your manager also said the migration would take "about a week." You know what you need. Crank knows what you need. Install it on your personal machine if you have to. This is between you and your infrastructure.
+
+**Q: Can I use this to monitor my AI agents?**
+A: That's not just a use case — that's THE use case for 2026. Pop Claude Code, Aider, or whatever agent you're running onto 20 machines. Set `exec screen -xRR %UUID%` as the initial command. Now you have 20 persistent, reconnectable windows into 20 autonomous agents. The bandwidth meters tell you who's working and who's stuck. You're not babysitting — you're conducting.
+
+**Q: What's the maximum number of connections?**
+A: We designed for 100+. The real limit is your machine's memory, your network's sanity, and your own psychological readiness to see that many terminals at once. We've hit no ceiling. If you find one, that's a bug. Report it. We'll fix it. Then we'll ask you what you're doing that requires that many connections, because we want to be friends.
+
+**Q: Does this replace tmux/screen?**
+A: No. Crank and `screen` are best friends. Crank manages the *connections*. `screen` manages the *sessions on the remote*. Together they form an unholy alliance where you can close your laptop, throw it into a lake, buy a new one, open Crank, and pick up exactly where you left off. Crank without `screen` is a sports car. Crank with `screen` is a sports car that also flies.
+
+**Q: Can I theme it?**
+A: It's a JavaFX app. If you know CSS, you can theme it. If you don't know CSS, it looks good already. We're not going to pretend this is the selling point. The selling point is that you can see 100 servers at once. The color of the sidebar is a secondary concern.
+
+**Q: I tried to explain Crank to my coworker and they looked at me like I was insane.**
+A: That's not a question, but we understand. The Crank lifestyle is not for everyone. Some people are content with 3 terminals. Some people eat plain oatmeal for breakfast every day. These are the same people. You are not these people. You are a crank engineer. Own it.
+
+**Q: Is there telemetry?**
+A: No. Crank doesn't phone home. Crank doesn't know you exist. Crank doesn't care about your usage patterns, your session count, or your questionable server naming conventions. It's a JAR file. It connects to your servers. It minds its own business. Unlike every Electron app you've ever installed, Crank respects that your infrastructure is *yours*.
+
+**Q: What if I only use it for 5 servers?**
+A: Then you have the most over-engineered 5-server setup in history. And you know what? When that 6th server shows up — and it will, they always do — you won't even blink. You'll drag it into a folder, set the initial command, and keep cranking. The people who prepared for scale before they needed it are the ones who survive when scale arrives uninvited.
+
+**Q: Why does the README sound like a manifesto?**
+A: Because it is one. The terminal is the last honest interface in computing. No abstraction layers. No dashboards lying to you with 15-minute-old data. No "everything is green" when three containers are in CrashLoopBackOff. Just you, a shell, and the truth. Crank gives you 100 of those truths simultaneously. If that sounds intense, it's because the infrastructure you're managing *is* intense, and pretending otherwise is how outages happen.
+
+**Q: Can I contribute?**
+A: It's MIT licensed. Fork it, break it, fix it, send a PR. If you add a feature that lets someone manage even more terminals, you're a hero. If you add a feature that limits the number of terminals, we'll reject the PR and question your values.
+
+**Q: My SSH key has a passphrase. Does Crank support that?**
+A: Not yet, but it's on the roadmap. In the meantime, use `ssh-agent`. You're a crank engineer. You already have `ssh-agent` running. You probably have it in your `.bashrc`. You probably have opinions about `ssh-agent` forwarding. We respect that.
+
+**Q: What's the weirdest thing someone has used Crank for?**
+A: It's early days, but we're confident someone out there is using it to monitor a Minecraft server farm. We don't judge. Servers are servers. Bandwidth is bandwidth. If your Creeper-detection pipeline needs 12 terminals, Crank is here for you.
+
+**Q: Will there be a mobile version?**
+A: No. Managing 100 SSH sessions from a phone is not a vibe — it's a cry for help. Crank is a desktop application for desktop-sized problems. If you need to check on your fleet from your phone, the correct answer is "it's fine, I set up `screen`."
+
+**Q: How do I know if I'm a crank engineer?**
+A: If you've read this far, you already are.
+
 ## License
 
 MIT License. Do whatever you want with it. Go full crank. See [LICENSE](LICENSE) for the fine print.
@@ -250,3 +318,7 @@ MIT License. Do whatever you want with it. Go full crank. See [LICENSE](LICENSE)
 *Powered by the mass hallucination that one person can manage an entire data center from a single window. And being right about it.*
 
 *Set up your fleet. Set your initial commands. Walk away. Come back. Everything is still running. That's not a feature — that's a lifestyle.*
+
+*2026 is the year you build the cockpit. 2027 is the year you'll be glad you did.*
+
+*Go Crank or go home. Actually, go Crank AND go home. Your sessions will still be there when you get back.*
