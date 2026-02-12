@@ -176,11 +176,34 @@ Hit the **Focus Mode** toggle and the left panel flips from tree navigation to a
 | **Gson** | JSON persistence because YAML is a war crime |
 | **Canvas rendering** | Direct pixel-level terminal drawing. No DOM. No WebView. No "it's basically a browser." |
 
-## Building
+## Getting Started
+
+Crank is a pure JVM application. You need a Java Development Kit installed — that's it.
 
 ### Prerequisites
-- JDK 17+
-- Maven (or use the included `mvnw` wrapper)
+
+- **JDK 17 or later** — Crank targets Java 17. Any distribution works: [Eclipse Temurin](https://adoptium.net/), [Amazon Corretto](https://aws.amazon.com/corretto/), [Oracle JDK](https://www.oracle.com/java/technologies/downloads/), or whatever your package manager provides.
+- **Maven** is included via the `mvnw` wrapper — no separate install needed.
+
+Verify your JDK:
+```bash
+java -version    # Should show 17 or higher
+```
+
+If you don't have a JDK installed:
+```bash
+# macOS (Homebrew)
+brew install openjdk@17
+
+# Ubuntu / Debian
+sudo apt install openjdk-17-jdk
+
+# Fedora
+sudo dnf install java-17-openjdk-devel
+
+# Windows (winget)
+winget install EclipseAdoptium.Temurin.17.JDK
+```
 
 ### Run from source
 ```bash
