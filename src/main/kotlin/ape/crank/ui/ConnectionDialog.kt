@@ -1,6 +1,7 @@
 package ape.crank.ui
 
 import ape.crank.model.ConnectionConfig
+import ape.crank.model.IdGenerator
 import ape.crank.model.KnownHostsPolicy
 import javafx.collections.FXCollections
 import javafx.geometry.Insets
@@ -9,7 +10,6 @@ import javafx.scene.control.*
 import javafx.scene.layout.*
 import javafx.scene.paint.Color
 import javafx.stage.FileChooser
-import java.util.UUID
 
 /**
  * Dialog for managing SSH connections (create, edit, delete).
@@ -442,8 +442,9 @@ class ConnectionDialog(
     }
 
     private fun addNewConnection() {
+        val existingIds = observableConnections.map { it.id }.toSet()
         val newConfig = ConnectionConfig(
-            id = UUID.randomUUID().toString(),
+            id = IdGenerator.generateUnique(existingIds),
             name = "New Connection"
         )
         observableConnections.add(newConfig)

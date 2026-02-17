@@ -1,6 +1,7 @@
 package ape.crank.ui
 
 import ape.crank.model.ConnectionConfig
+import ape.crank.model.IdGenerator
 import ape.crank.model.TerminalSession
 import javafx.collections.FXCollections
 import javafx.geometry.Insets
@@ -8,14 +9,14 @@ import javafx.scene.control.*
 import javafx.scene.layout.ColumnConstraints
 import javafx.scene.layout.GridPane
 import javafx.scene.layout.Priority
-import java.util.UUID
 
 /**
  * Dialog for creating a new terminal session.
  * Allows the user to enter a session name and select a connection.
  */
 class NewTerminalDialog(
-    connections: List<ConnectionConfig>
+    connections: List<ConnectionConfig>,
+    private val existingSessionIds: Set<String> = emptySet()
 ) : Dialog<TerminalSession?>() {
 
     private val sessionNameField = TextField()
@@ -106,7 +107,7 @@ class NewTerminalDialog(
                 val selectedConnection = connectionCombo.selectionModel.selectedItem
                 if (selectedConnection != null && sessionNameField.text.isNotBlank()) {
                     TerminalSession(
-                        id = UUID.randomUUID().toString(),
+                        id = IdGenerator.generateUnique(existingSessionIds),
                         name = sessionNameField.text.trim(),
                         connectionId = selectedConnection.id
                     )

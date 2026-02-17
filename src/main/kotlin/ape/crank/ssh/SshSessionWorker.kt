@@ -236,13 +236,20 @@ class SshSessionWorker(
                 )
             }
 
-            // Listen for session close events — provides faster disconnect detection
-            // than waiting for the reader thread to get EOF/error
+            // Listen for session close/exception events — provides faster disconnect
+            // detection than waiting for the reader thread to get EOF/error, and
+            // captures the actual reason MINA SSHD decided to kill the session.
             newSession.addSessionListener(object : SessionListener {
                 override fun sessionClosed(closedSession: Session) {
                     if (!shutdownRequested.get() && !reconnectEnabled.get()) {
-                        handleConnectionLost()
+                        handleConnectionLost("sessionClosed callback")
                     }
+                }
+
+                override fun sessionException(session: Session, t: Throwable) {
+                    val msg = buildErrorChain(t)
+                    System.err.println("[SshSessionWorker:$sessionId] sessionException: $msg")
+                    recordError("sessionException", Exception(msg, t))
                 }
             })
 
@@ -323,7 +330,7 @@ class SshSessionWorker(
             bytesSent.addAndGet(bytes.size.toLong())
         } catch (e: Exception) {
             System.err.println("[SshSessionWorker:$sessionId] sendData failed: ${e.message}")
-            handleConnectionLost()
+            handleConnectionLost("sendData failed: ${e.message}")
         }
     }
 
@@ -477,11 +484,12 @@ class SshSessionWorker(
             } catch (_: InterruptedException) {
             } catch (e: Exception) {
                 if (!shutdownRequested.get()) {
+                    recordError("readerThread", e)
                     System.err.println("[SshSessionWorker:$sessionId] reader error: ${e.message}")
                 }
             }
             if (!shutdownRequested.get() && !reconnectEnabled.get()) {
-                handleConnectionLost()
+                handleConnectionLost("readerThread exit (EOF or channel closed)")
             }
         }, "ssh-reader-$sessionId")
         thread.isDaemon = true
@@ -489,15 +497,24 @@ class SshSessionWorker(
         readerThread = thread
     }
 
-    private fun handleConnectionLost() {
+    private fun handleConnectionLost(trigger: String = "unknown") {
         if (shutdownRequested.get()) return
         // CAS guard: only the first caller triggers reconnection
         if (!state.compareAndSet(State.CONNECTED, State.DISCONNECTED)) return
-        if (connectedSince > 0) {
-            lastSessionDurationMs = System.currentTimeMillis() - connectedSince
-        }
+
+        val duration = if (connectedSince > 0) System.currentTimeMillis() - connectedSince else 0L
+        lastSessionDurationMs = duration
         connectedSince = 0L
-        recordError("connection", Exception("Connection lost"))
+
+        // Capture channel/session state for diagnostics
+        val ch = channel
+        val sess = session
+        val channelState = if (ch != null) "open=${ch.isOpen},closed=${ch.isClosed},closing=${ch.isClosing}" else "null"
+        val sessionState = if (sess != null) "open=${sess.isOpen},closed=${sess.isClosed},closing=${sess.isClosing}" else "null"
+        val detail = "Connection lost [trigger=$trigger, uptime=${duration}ms, channel=($channelState), session=($sessionState)]"
+
+        System.err.println("[SshSessionWorker:$sessionId] $detail")
+        recordError("connection", Exception(detail))
         reconnectWithBackoff()
     }
 }

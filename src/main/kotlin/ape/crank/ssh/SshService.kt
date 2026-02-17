@@ -42,6 +42,9 @@ class SshService {
 
     fun getWorker(sessionId: String): SshSessionWorker? = workers[sessionId]
 
+    /** Returns all active workers (snapshot). */
+    fun allWorkers(): Collection<SshSessionWorker> = workers.values
+
     fun shutdown() {
         for ((_, worker) in workers) {
             try { worker.shutdown() } catch (_: Exception) {}
@@ -76,6 +79,21 @@ class SshService {
             CoreModuleProperties.IDLE_TIMEOUT.set(client, java.time.Duration.ZERO)
         } catch (e: Exception) {
             System.err.println("[SshService] failed to disable idle timeout: ${e.message}")
+        }
+
+        // Disable NIO2 read/write timeouts — these operate below the SSH protocol layer
+        // and can silently kill connections even when SSH heartbeats are active. OpenSSH
+        // has no equivalent timeouts, which is why GNOME Terminal connections survive while
+        // Crank's drop.
+        try {
+            CoreModuleProperties.NIO2_READ_TIMEOUT.set(client, java.time.Duration.ZERO)
+        } catch (e: Exception) {
+            System.err.println("[SshService] failed to disable NIO2 read timeout: ${e.message}")
+        }
+        try {
+            CoreModuleProperties.NIO2_MIN_WRITE_TIMEOUT.set(client, java.time.Duration.ZERO)
+        } catch (e: Exception) {
+            System.err.println("[SshService] failed to disable NIO2 write timeout: ${e.message}")
         }
 
         client.start()

@@ -25,8 +25,8 @@ import javafx.scene.layout.Priority
 import javafx.scene.layout.StackPane
 import javafx.scene.layout.VBox
 import javafx.stage.Stage
+import ape.crank.model.IdGenerator
 import javafx.util.Duration
-import java.util.UUID
 import java.util.Timer
 import java.util.TimerTask
 
@@ -230,11 +230,19 @@ class MainWindow(private val stateManager: StateManager) {
             val sid = currentSessionId ?: return@label
             sshService.getWorker(sid)?.sendData(data)
         }
-        terminalWidget.onResize = label@{ cols, rows ->
-            val sid = currentSessionId ?: return@label
-            // Resize the buffer (already done by handleLayoutResize on the attached buffer,
-            // but the worker needs the PTY signal)
-            sshService.getWorker(sid)?.resize(cols, rows)
+        terminalWidget.onResize = { cols, rows ->
+            // Broadcast PTY resize to ALL connected sessions so background sessions
+            // stay in sync. This prevents artifacts when switching sessions (especially
+            // with multiplexers like screen/tmux that redraw on SIGWINCH).
+            for (worker in sshService.allWorkers()) {
+                worker.resize(cols, rows)
+            }
+            // Also resize all off-screen terminal buffers so they match when switched to
+            for ((_, buf) in terminalBuffers) {
+                if (buf.cols != cols || buf.rows != rows) {
+                    buf.resize(cols, rows)
+                }
+            }
         }
         terminalWidget.onScrollChanged = { offset, max ->
             Platform.runLater {
@@ -475,7 +483,8 @@ class MainWindow(private val stateManager: StateManager) {
             return
         }
 
-        val dialog = NewTerminalDialog(stateManager.state.connections)
+        val existingIds = stateManager.state.sessions.map { it.id }.toSet()
+        val dialog = NewTerminalDialog(stateManager.state.connections, existingIds)
         val result = dialog.showAndWait()
         val session: TerminalSession? = if (result.isPresent) result.get() else null
         if (session == null) return
@@ -511,8 +520,9 @@ class MainWindow(private val stateManager: StateManager) {
         dialog.contentText = "Name:"
         val result = dialog.showAndWait()
         if (result.isPresent && result.get().isNotBlank()) {
+            val existingFolderIds = stateManager.state.folders.map { it.id }.toSet()
             val folder = SessionFolder(
-                id = UUID.randomUUID().toString(),
+                id = IdGenerator.generateUnique(existingFolderIds),
                 name = result.get().trim(),
                 order = stateManager.state.folders.size
             )

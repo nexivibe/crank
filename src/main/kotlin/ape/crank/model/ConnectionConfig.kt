@@ -1,11 +1,9 @@
 package ape.crank.model
 
-import java.util.UUID
-
 enum class KnownHostsPolicy { STRICT, ACCEPT_NEW, TRUST_ALL }
 
 data class ConnectionConfig(
-    val id: String = UUID.randomUUID().toString(),
+    val id: String = IdGenerator.generate(),
     var name: String = "",
     var host: String = "",
     var port: Int = 22,
