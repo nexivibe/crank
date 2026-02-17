@@ -22,7 +22,7 @@ You are the air traffic controller. The servers are the planes. Crank is the rad
 
 Pop enough agents on enough machines with enough terminals and you don't have a deployment pipeline — you have an **orchestra**. And you're the conductor. With 100 batons.
 
-Here's the thing nobody tells you about managing infrastructure: **you should be able to walk away.** Close your laptop. Go to lunch. Let your cat walk across the keyboard. Come back and everything is exactly where you left it. Every session reconnected. Every `screen` session resumed. Every terminal buffer intact. Crank + `screen` means your work survives you. Your laptop crashing is an inconvenience, not a catastrophe. Set `exec screen -xRR %UUID%` as your initial command and every session gets its own named `screen` that auto-resumes on reconnect. You don't lose work. You don't lose context. You don't lose your mind.
+Here's the thing nobody tells you about managing infrastructure: **you should be able to walk away.** Close your laptop. Go to lunch. Let your cat walk across the keyboard. Come back and everything is exactly where you left it. Every session reconnected. Every `tmux` session resumed. Every terminal buffer intact. Crank + `tmux` means your work survives you. Your laptop crashing is an inconvenience, not a catastrophe. Set `exec tmux new-session -A -s %UUID%` as your initial command and every session gets its own named `tmux` session that auto-resumes on reconnect. You don't lose work. You don't lose context. You don't lose your mind.
 
 ## Why
 
@@ -75,11 +75,11 @@ Here's the play that nobody else sees coming:
 
 1. **Spin up your fleet.** Cloud, bare metal, your roommate's gaming PC — Crank doesn't discriminate. If it has an SSH port, it's part of the plan.
 
-2. **Set `exec screen -xRR %UUID%` as your initial command.** Now every Crank session is backed by a named `screen` on the remote box. Your processes don't die when you disconnect. Your logs don't stop. Your deploys don't abort. The remote keeps cranking whether you're watching or not.
+2. **Set `exec tmux new-session -A -s %UUID%` as your initial command.** Now every Crank session is backed by a named `tmux` session on the remote box. Your processes don't die when you disconnect. Your logs don't stop. Your deploys don't abort. The remote keeps cranking whether you're watching or not.
 
 3. **Pop agents everywhere.** Claude Code on every machine. Aider on the dev boxes. Custom scripts on the build servers. Monitoring dashboards on the infra nodes. You're not running one agent — you're running a **distributed intelligence network** with you at the center.
 
-4. **Walk away.** Close your laptop. Go home. Sleep. Crank auto-reconnects with exponential backoff. `screen -xRR %UUID%` reattaches to the exact session. Your terminal buffer is right where you left it. That deploy you started at 3pm? It finished at 3:07pm. You're seeing the output at 9am the next morning. Nothing was lost. You just blinked.
+4. **Walk away.** Close your laptop. Go home. Sleep. Crank auto-reconnects with exponential backoff. `tmux new-session -A -s %UUID%` reattaches to the exact session. Your terminal buffer is right where you left it. That deploy you started at 3pm? It finished at 3:07pm. You're seeing the output at 9am the next morning. Nothing was lost. You just blinked.
 
 5. **Coordinate in real time.** Crank shows you which sessions are active, which are idle, which are streaming data. The bandwidth meters pulse in real time. Agent on box 12 just finished the refactor? The meter drops to `░░░░░`. Box 37 is burning CPU? `█████`. You can feel the rhythm of your infrastructure without reading a single line of output.
 
@@ -103,7 +103,7 @@ Here's the math that nobody wants to do:
 Going Crank in 2026 means:
 - You **see everything** before it becomes a problem in 2027
 - You **build the muscle memory** for fleet-scale terminal management before fleet-scale is mandatory
-- You **set up `screen`-backed sessions** on every machine so that when 2027 hits and your infrastructure is three times the size, your workflow doesn't change — it just scales
+- You **set up `tmux`-backed sessions** on every machine so that when 2027 hits and your infrastructure is three times the size, your workflow doesn't change — it just scales
 - You **stop being the bottleneck** between "agent finished task on box 47" and "engineer noticed 35 minutes later"
 
 The engineers who go Crank in 2026 will walk into 2027 with a war room already built, muscle memory already trained, and a bandwidth-metered view of their entire fleet pulsing on screen like a heartbeat monitor. Everyone else will be opening their 94th terminal tab and wondering why they feel like they're drowning.
@@ -118,9 +118,9 @@ The engineers who go Crank in 2026 will walk into 2027 with a war room already b
 - Known hosts policy (Trust All / Accept New / Strict)
 - Keep-alive intervals, connection timeouts, compression
 - **Initial Command** — Run a command automatically when the session connects (and on every reconnect). Supports template variables:
-  - `%UUID%` — The session's unique ID (perfect for naming `screen`/`tmux` sessions)
+  - `%UUID%` — The session's unique ID (perfect for naming `tmux` sessions)
   - `%NAME%` — The connection's display name
-  - Example: `exec screen -xRR %UUID%` — Creates or reattaches a `screen` session named after the Crank session ID. Walk away, come back, pick up exactly where you left off. Your processes keep running. Your logs keep tailing. Your deploys keep deploying. You just weren't watching for a bit.
+  - Example: `exec tmux new-session -A -s %UUID%` — Creates or attaches to a `tmux` session named after the Crank session ID. Walk away, come back, pick up exactly where you left off. Your processes keep running. Your logs keep tailing. Your deploys keep deploying. You just weren't watching for a bit.
 - Labels and color coding because when you have 100 connections, you need to vibe-code your infrastructure
 
 ### Session Organization
@@ -229,7 +229,7 @@ There's a moment in every engineer's career where they realize they need more te
 
 Maybe you're deploying to 30 servers and need to watch the rollout in real time. Maybe you're debugging a distributed system and need logs from 12 services simultaneously. Maybe you're coordinating a fleet of AI agents across a dozen machines and you need to see which ones are cranking and which ones are stalling. Maybe you're just the kind of person who keeps a terminal open to every machine they've ever SSHed into, because you never know.
 
-Whatever your reason, you've hit the ceiling of every other tool. Your browser-based terminal can't handle it. Your tiling window manager is running out of pixels. Your tmux session has so many panes that `Ctrl-B` followed by a direction key has become a game of chance.
+Whatever your reason, you've hit the ceiling of every other tool. Your browser-based terminal can't handle it. Your tiling window manager is running out of pixels. Your tmux has so many panes that `Ctrl-B` followed by a direction key has become a game of chance.
 
 Other engineers look at their infrastructure through a keyhole. You kicked the door off its hinges.
 
@@ -262,10 +262,10 @@ A: No. This is a native desktop application. It starts in under a second. It doe
 A: Then you have room to grow. Crank believes in you.
 
 **Q: What happens when my laptop crashes?**
-A: Nothing. That's the point. If you set your initial command to `exec screen -xRR %UUID%`, every session runs inside a named `screen` on the remote machine. Your laptop dies, you restart Crank, it reconnects all 100 sessions, each one reattaches to its `screen`, and you're staring at the exact same terminal output as before. The remote never stopped. The logs never stopped tailing. The deploy never stopped deploying. You just stopped watching for a minute.
+A: Nothing. That's the point. If you set your initial command to `exec tmux new-session -A -s %UUID%`, every session runs inside a named `tmux` session on the remote machine. Your laptop dies, you restart Crank, it reconnects all 100 sessions, each one reattaches to its `tmux` session, and you're staring at the exact same terminal output as before. The remote never stopped. The logs never stopped tailing. The deploy never stopped deploying. You just stopped watching for a minute.
 
 **Q: What's the initial command for?**
-A: It runs automatically every time a session connects — including reconnects. The killer combo is `exec screen -xRR %UUID%`. That tells the remote shell to replace itself with a `screen` session named after Crank's session UUID. If the `screen` exists, it reattaches. If it doesn't, it creates one. You get persistent, named, resumable sessions on every box in your fleet for free. You can also use `%NAME%` if you want human-readable screen names. Or just run `cd /var/log && tail -f syslog` if you don't need persistence and just want every connection to start tailing logs immediately.
+A: It runs automatically every time a session connects — including reconnects. The killer combo is `exec tmux new-session -A -s %UUID%`. That tells the remote shell to replace itself with a `tmux` session named after Crank's session UUID. If the session exists, `-A` attaches to it. If it doesn't, it creates one. You get persistent, named, resumable sessions on every box in your fleet for free. You can also use `%NAME%` if you want human-readable session names. Or just run `cd /var/log && tail -f syslog` if you don't need persistence and just want every connection to start tailing logs immediately.
 
 **Q: What are the bandwidth meters?**
 A: Every session in the tree shows 5 blocks: `█████` means it's the hottest session you have. `░░░░░` means it's idle. They're relative — the busiest session gets 5 bars, everyone else is scaled against it. When you have 47 sessions open, you don't read labels. You read shapes. The one with full blocks? That's where the action is. The one that just dropped to empty? Something finished. Or something broke.
@@ -292,13 +292,13 @@ A: A terminal multiplexer shows you one machine at a time. Crank shows you your 
 A: Your manager also said the migration would take "about a week." You know what you need. Crank knows what you need. Install it on your personal machine if you have to. This is between you and your infrastructure.
 
 **Q: Can I use this to monitor my AI agents?**
-A: That's not just a use case — that's THE use case for 2026. Pop Claude Code, Aider, or whatever agent you're running onto 20 machines. Set `exec screen -xRR %UUID%` as the initial command. Now you have 20 persistent, reconnectable windows into 20 autonomous agents. The bandwidth meters tell you who's working and who's stuck. You're not babysitting — you're conducting.
+A: That's not just a use case — that's THE use case for 2026. Pop Claude Code, Aider, or whatever agent you're running onto 20 machines. Set `exec tmux new-session -A -s %UUID%` as the initial command. Now you have 20 persistent, reconnectable windows into 20 autonomous agents. The bandwidth meters tell you who's working and who's stuck. You're not babysitting — you're conducting.
 
 **Q: What's the maximum number of connections?**
 A: We designed for 100+. The real limit is your machine's memory, your network's sanity, and your own psychological readiness to see that many terminals at once. We've hit no ceiling. If you find one, that's a bug. Report it. We'll fix it. Then we'll ask you what you're doing that requires that many connections, because we want to be friends.
 
-**Q: Does this replace tmux/screen?**
-A: No. Crank and `screen` are best friends. Crank manages the *connections*. `screen` manages the *sessions on the remote*. Together they form an unholy alliance where you can close your laptop, throw it into a lake, buy a new one, open Crank, and pick up exactly where you left off. Crank without `screen` is a sports car. Crank with `screen` is a sports car that also flies.
+**Q: Does this replace tmux?**
+A: No. Crank and `tmux` are best friends. Crank manages the *connections*. `tmux` manages the *sessions on the remote*. Together they form an unholy alliance where you can close your laptop, throw it into a lake, buy a new one, open Crank, and pick up exactly where you left off. Crank without `tmux` is a sports car. Crank with `tmux` is a sports car that also flies.
 
 **Q: Can I theme it?**
 A: It's a JavaFX app. If you know CSS, you can theme it. If you don't know CSS, it looks good already. We're not going to pretend this is the selling point. The selling point is that you can see 100 servers at once. The color of the sidebar is a secondary concern.
@@ -325,7 +325,7 @@ A: Not yet, but it's on the roadmap. In the meantime, use `ssh-agent`. You're a 
 A: It's early days, but we're confident someone out there is using it to monitor a Minecraft server farm. We don't judge. Servers are servers. Bandwidth is bandwidth. If your Creeper-detection pipeline needs 12 terminals, Crank is here for you.
 
 **Q: Will there be a mobile version?**
-A: No. Managing 100 SSH sessions from a phone is not a vibe — it's a cry for help. Crank is a desktop application for desktop-sized problems. If you need to check on your fleet from your phone, the correct answer is "it's fine, I set up `screen`."
+A: No. Managing 100 SSH sessions from a phone is not a vibe — it's a cry for help. Crank is a desktop application for desktop-sized problems. If you need to check on your fleet from your phone, the correct answer is "it's fine, I set up `tmux`."
 
 **Q: How do I know if I'm a crank engineer?**
 A: If you've read this far, you already are.
